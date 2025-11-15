@@ -10,6 +10,7 @@ import MarketplacesTab from '@/components/dashboard/MarketplacesTab';
 import AIAssistantTab from '@/components/dashboard/AIAssistantTab';
 import MobileAppTab from '@/components/dashboard/MobileAppTab';
 import ProfileTab from '@/components/dashboard/ProfileTab';
+import WebStoreTab from '@/components/dashboard/WebStoreTab';
 import MarketplaceConnectDialog from '@/components/dashboard/MarketplaceConnectDialog';
 import NotificationPermission from '@/components/dashboard/NotificationPermission';
 
@@ -320,6 +321,8 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
           {activeTab === 'aiAssistant' && <AIAssistantTab />}
           
           {activeTab === 'mobileApp' && <MobileAppTab />}
+          
+          {activeTab === 'webstore' && <WebStoreTab />}
           
           {activeTab === 'profile' && <ProfileTab onLogout={onLogout} />}
 

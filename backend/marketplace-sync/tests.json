@@ -1,0 +1,41 @@
+{
+  "tests": [
+    {
+      "name": "Connect Ozon marketplace",
+      "method": "POST",
+      "path": "/?marketplace=ozon&action=connect",
+      "body": {
+        "apiKey": "test-api-key",
+        "clientId": "test-client-id"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true,
+        "marketplace": "ozon",
+        "connected": true
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get Ozon products",
+      "method": "GET",
+      "path": "/?marketplace=ozon&action=getProducts",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "products": "array",
+        "total": "number"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get Ozon orders",
+      "method": "GET",
+      "path": "/?marketplace=ozon&action=getOrders",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "orders": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

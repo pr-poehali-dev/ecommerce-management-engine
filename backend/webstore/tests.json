@@ -1,0 +1,41 @@
+{
+  "tests": [
+    {
+      "name": "Get store settings",
+      "method": "GET",
+      "path": "/?action=getSettings",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "storeId": "string",
+        "storeName": "string",
+        "status": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Create new store",
+      "method": "POST",
+      "path": "/?action=createStore",
+      "body": {
+        "storeName": "Test Store",
+        "theme": "modern"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true,
+        "store": "object"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get available themes",
+      "method": "GET",
+      "path": "/?action=getThemes",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "themes": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

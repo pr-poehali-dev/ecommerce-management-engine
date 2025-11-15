@@ -15,13 +15,14 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   
   const menuItems = [
     { id: 'dashboard', icon: 'LayoutDashboard', label: t('dashboard') },
-    { id: 'aiInsights', icon: 'Sparkles', label: t('aiInsights') },
-    { id: 'aiAssistant', icon: 'Bot', label: t('aiAssistant') },
-    { id: 'automation', icon: 'Zap', label: t('automation') },
+    { id: 'webstore', icon: 'Store', label: 'Мой магазин' },
     { id: 'products', icon: 'Package', label: t('products') },
     { id: 'orders', icon: 'ShoppingCart', label: t('orders') },
     { id: 'customers', icon: 'Users', label: t('customers') },
     { id: 'marketplaces', icon: 'Globe', label: t('marketplaces') },
+    { id: 'aiInsights', icon: 'Sparkles', label: t('aiInsights') },
+    { id: 'aiAssistant', icon: 'Bot', label: t('aiAssistant') },
+    { id: 'automation', icon: 'Zap', label: t('automation') },
     { id: 'mobileApp', icon: 'Smartphone', label: t('mobileApp') },
     { id: 'profile', icon: 'User', label: t('profile') }
   ];
