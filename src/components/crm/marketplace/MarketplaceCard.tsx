@@ -27,10 +27,12 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
   };
 
   return (
-    <Card className="p-6 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between mb-4">
+    <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 relative overflow-hidden group">
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+      
+      <div className="flex items-start justify-between mb-4 relative z-10">
         <div className="flex items-center gap-3">
-          <div className="text-4xl">{info.logo}</div>
+          <div className="text-4xl transform group-hover:scale-110 transition-transform duration-300">{info.logo}</div>
           <div>
             <h3 className="font-semibold text-lg">{info.displayName}</h3>
             <span
@@ -47,13 +49,14 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
         <Button 
           variant="ghost" 
           size="sm"
+          className="opacity-0 group-hover:opacity-100 transition-opacity duration-300"
           onClick={() => onOpenSettings(marketplace)}
         >
           <Icon name="Settings" className="h-4 w-4" />
         </Button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 relative z-10">
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Товары</span>
           <span className="font-semibold">{marketplace.products_count}</span>
@@ -69,7 +72,7 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
       </div>
 
       {marketplace.is_connected && (
-        <div className="mt-4 pt-4 border-t">
+        <div className="mt-4 pt-4 border-t relative z-10">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Icon name="Clock" className="h-3 w-3" />
             <span>
@@ -93,7 +96,7 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
       {!marketplace.is_connected && (
         <Button
           variant="outline"
-          className="w-full mt-4"
+          className="w-full mt-4 relative z-10"
           onClick={() => onOpenConnect(marketplace.slug || marketplace.name)}
         >
           Подключить

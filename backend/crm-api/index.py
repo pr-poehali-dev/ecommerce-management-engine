@@ -79,9 +79,6 @@ def get_marketplaces() -> Dict[str, Any]:
             COALESCE(umi.api_key, '') as api_key,
             COALESCE(umi.store_id, '') as client_id,
             CASE WHEN umi.id IS NOT NULL THEN true ELSE false END as is_connected,
-            0 as products_count,
-            0 as orders_count,
-            0 as total_revenue,
             umi.last_sync as last_sync_at
         FROM marketplaces m
         LEFT JOIN user_marketplace_integrations umi 
@@ -90,6 +87,13 @@ def get_marketplaces() -> Dict[str, Any]:
     """)
     
     marketplaces = [dict(m) for m in cur.fetchall()]
+    
+    # Устанавливаем значения по умолчанию (подсчеты не работают с goauth-proxy)
+    for marketplace in marketplaces:
+        marketplace['products_count'] = 0
+        marketplace['orders_count'] = 0
+        marketplace['total_revenue'] = 0.0
+    
     cur.close()
     conn.close()
     
@@ -112,11 +116,12 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
+    name_escaped = name.replace("'", "''")
+    cur.execute(f"""
         SELECT id FROM marketplaces
-        WHERE slug = %s OR LOWER(name) = LOWER(%s)
+        WHERE slug = '{name_escaped}' OR LOWER(name) = LOWER('{name_escaped}')
         LIMIT 1
-    """, (name, name))
+    """)
     
     marketplace_result = cur.fetchone()
     
@@ -128,31 +133,39 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     marketplace_id = marketplace_result['id']
     user_id = 1
     
-    cur.execute("""
+    cur.execute(f"""
         SELECT id FROM user_marketplace_integrations
-        WHERE user_id = %s AND marketplace_id = %s
-    """, (user_id, marketplace_id))
+        WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
+    """)
     
     existing = cur.fetchone()
     
     if existing:
-        cur.execute("""
+        api_key_escaped = (api_key or '').replace("'", "''")
+        seller_id_escaped = (seller_id or '').replace("'", "''")
+        client_id_escaped = (client_id or '').replace("'", "''")
+        last_sync = datetime.now()
+        cur.execute(f"""
             UPDATE user_marketplace_integrations
-            SET api_key = %s, api_secret = %s, store_id = %s, status = 'active', last_sync = %s
-            WHERE user_id = %s AND marketplace_id = %s
+            SET api_key = '{api_key_escaped}', api_secret = '{seller_id_escaped}', store_id = '{client_id_escaped}', status = 'active', last_sync = '{last_sync}'
+            WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
             RETURNING id
-        """, (api_key, seller_id, client_id, datetime.now(), user_id, marketplace_id))
+        """)
     else:
-        cur.execute("""
+        api_key_escaped = (api_key or '').replace("'", "''")
+        seller_id_escaped = (seller_id or '').replace("'", "''")
+        client_id_escaped = (client_id or '').replace("'", "''")
+        last_sync = datetime.now()
+        cur.execute(f"""
             INSERT INTO user_marketplace_integrations 
             (user_id, marketplace_id, api_key, api_secret, store_id, status, last_sync)
-            VALUES (%s, %s, %s, %s, %s, 'active', %s)
+            VALUES ({user_id}, {marketplace_id}, '{api_key_escaped}', '{seller_id_escaped}', '{client_id_escaped}', 'active', '{last_sync}')
             RETURNING id
-        """, (user_id, marketplace_id, api_key, seller_id, client_id, datetime.now()))
+        """)
     
     integration_id = cur.fetchone()['id']
     
-    cur.execute("""
+    cur.execute(f"""
         SELECT 
             m.id,
             m.name,
@@ -164,8 +177,8 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
             umi.last_sync as last_sync_at
         FROM marketplaces m
         JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
-        WHERE umi.id = %s
-    """, (integration_id,))
+        WHERE umi.id = {integration_id}
+    """)
     
     marketplace_info = cur.fetchone()
     
@@ -191,11 +204,11 @@ def disconnect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     
     user_id = 1
     
-    cur.execute("""
+    cur.execute(f"""
         DELETE FROM user_marketplace_integrations
-        WHERE user_id = %s AND marketplace_id = %s
+        WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
         RETURNING marketplace_id
-    """, (user_id, marketplace_id))
+    """)
     
     deleted = cur.fetchone()
     
@@ -217,7 +230,8 @@ def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     if marketplace:
-        cur.execute("""
+        marketplace_escaped = marketplace.replace("'", "''")
+        cur.execute(f"""
             SELECT 
                 p.*,
                 mp.marketplace_id,
@@ -227,9 +241,9 @@ def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
             FROM products p
             LEFT JOIN marketplace_products mp ON p.id = mp.product_id
             LEFT JOIN marketplaces m ON mp.marketplace_id = m.id
-            WHERE m.name = %s
+            WHERE m.slug = '{marketplace_escaped}' OR LOWER(m.name) = LOWER('{marketplace_escaped}')
             ORDER BY p.created_at DESC
-        """, (marketplace,))
+        """)
     else:
         cur.execute("""
             SELECT 
@@ -268,17 +282,16 @@ def get_orders(status: Optional[str] = None, marketplace: Optional[str] = None) 
         WHERE 1=1
     """
     
-    params = []
     if status:
-        query += " AND o.status = %s"
-        params.append(status)
+        status_escaped = status.replace("'", "''")
+        query += f" AND o.status = '{status_escaped}'"
     if marketplace:
-        query += " AND m.name = %s"
-        params.append(marketplace)
+        marketplace_escaped = marketplace.replace("'", "''")
+        query += f" AND (m.slug = '{marketplace_escaped}' OR LOWER(m.name) = LOWER('{marketplace_escaped}'))"
     
     query += " GROUP BY o.id, m.name ORDER BY o.order_date DESC LIMIT 100"
     
-    cur.execute(query, params)
+    cur.execute(query)
     orders = [dict(o) for o in cur.fetchall()]
     cur.close()
     conn.close()
@@ -300,12 +313,13 @@ def update_order_status(data: Dict[str, Any]) -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
+    new_status_escaped = new_status.replace("'", "''")
+    cur.execute(f"""
         UPDATE orders
-        SET status = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
+        SET status = '{new_status_escaped}', updated_at = CURRENT_TIMESTAMP
+        WHERE id = {order_id}
         RETURNING *
-    """, (new_status, order_id))
+    """)
     
     order = cur.fetchone()
     cur.close()
@@ -328,51 +342,57 @@ def get_analytics(period: str = '30d') -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
-        SELECT 
-            COUNT(*) as total_orders,
-            COALESCE(SUM(total_amount), 0) as total_revenue,
-            COALESCE(AVG(total_amount), 0) as avg_order_value,
-            COUNT(DISTINCT marketplace_id) as active_marketplaces
-        FROM orders
-        WHERE order_date >= %s
-    """, (start_date,))
+    # Упрощенная версия без агрегации (goauth-proxy limitation)
+    cur.execute("SELECT * FROM orders")
+    all_orders = cur.fetchall()
     
-    stats = cur.fetchone()
+    filtered_orders = [o for o in all_orders if o.get('order_date') and o['order_date'] >= start_date]
     
-    cur.execute("""
-        SELECT 
-            DATE(order_date) as date,
-            COUNT(*) as orders,
-            COALESCE(SUM(total_amount), 0) as revenue
-        FROM orders
-        WHERE order_date >= %s
-        GROUP BY DATE(order_date)
-        ORDER BY date
-    """, (start_date,))
+    total_orders = len(filtered_orders)
+    total_revenue = sum(float(o['total_amount']) for o in filtered_orders) if filtered_orders else 0.0
+    avg_order_value = total_revenue / total_orders if total_orders > 0 else 0.0
+    active_marketplaces = len(set(o['marketplace_id'] for o in filtered_orders)) if filtered_orders else 0
     
-    daily_stats = cur.fetchall()
+    stats = {
+        'total_orders': total_orders,
+        'total_revenue': total_revenue,
+        'avg_order_value': avg_order_value,
+        'active_marketplaces': active_marketplaces
+    }
     
-    cur.execute("""
-        SELECT 
-            m.name,
-            COUNT(o.id) as orders,
-            COALESCE(SUM(o.total_amount), 0) as revenue
-        FROM marketplaces m
-        LEFT JOIN orders o ON m.id = o.marketplace_id AND o.order_date >= %s
-        GROUP BY m.name
-        ORDER BY revenue DESC
-    """, (start_date,))
+    # Группировка по дням в Python
+    from collections import defaultdict
+    daily_dict = defaultdict(lambda: {'orders': 0, 'revenue': 0.0})
+    for o in filtered_orders:
+        date_key = o['order_date'].date() if hasattr(o['order_date'], 'date') else o['order_date']
+        daily_dict[date_key]['orders'] += 1
+        daily_dict[date_key]['revenue'] += float(o['total_amount'])
     
-    marketplace_stats = cur.fetchall()
+    daily_stats = [{'date': str(date), 'orders': data['orders'], 'revenue': data['revenue']} 
+                   for date, data in sorted(daily_dict.items())]
+    
+    # Получаем все маркетплейсы
+    cur.execute("SELECT * FROM marketplaces")
+    all_marketplaces = cur.fetchall()
+    
+    # Группировка по маркетплейсам
+    mp_dict = {mp['id']: {'name': mp['name'], 'orders': 0, 'revenue': 0.0} for mp in all_marketplaces}
+    for o in filtered_orders:
+        mp_id = o['marketplace_id']
+        if mp_id in mp_dict:
+            mp_dict[mp_id]['orders'] += 1
+            mp_dict[mp_id]['revenue'] += float(o['total_amount'])
+    
+    marketplace_stats = [data for data in mp_dict.values() if data['orders'] > 0]
+    marketplace_stats.sort(key=lambda x: x['revenue'], reverse=True)
     
     cur.close()
     conn.close()
     
     return success_response({
-        'summary': dict(stats),
-        'daily': [dict(d) for d in daily_stats],
-        'byMarketplace': [dict(m) for m in marketplace_stats],
+        'summary': stats,
+        'daily': daily_stats,
+        'byMarketplace': marketplace_stats,
         'period': period
     })
 
@@ -382,44 +402,61 @@ def get_dashboard() -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
-        SELECT 
-            (SELECT COUNT(*) FROM marketplaces) as total_marketplaces,
-            (SELECT COUNT(*) FROM user_marketplace_integrations) as connected_marketplaces,
-            (SELECT COUNT(*) FROM products) as total_products,
-            (SELECT COUNT(*) FROM orders) as total_orders,
-            (SELECT COALESCE(SUM(total_amount), 0) FROM orders) as total_revenue
-    """)
+    # Получаем статистику отдельными запросами  
+    cur.execute("SELECT * FROM marketplaces")
+    total_marketplaces = len(cur.fetchall())
     
-    dashboard_stats = cur.fetchone()
+    cur.execute("SELECT * FROM user_marketplace_integrations")
+    connected_marketplaces = len(cur.fetchall())
     
-    cur.execute("""
-        SELECT * FROM orders
-        ORDER BY order_date DESC
-        LIMIT 10
-    """)
+    cur.execute("SELECT * FROM products")
+    total_products = len(cur.fetchall())
     
-    recent_orders = cur.fetchall()
+    cur.execute("SELECT * FROM orders")
+    all_orders = cur.fetchall()
+    total_orders = len(all_orders)
+    total_revenue = sum(float(o['total_amount']) for o in all_orders) if all_orders else 0.0
     
-    cur.execute("""
-        SELECT 
-            p.*,
-            COALESCE(SUM(mp.stock), 0) as total_stock
-        FROM products p
-        LEFT JOIN marketplace_products mp ON p.id = mp.product_id
-        GROUP BY p.id
-        HAVING COALESCE(SUM(mp.stock), 0) < 10
-        ORDER BY total_stock
-        LIMIT 10
-    """)
+    dashboard_stats = {
+        'total_marketplaces': total_marketplaces,
+        'connected_marketplaces': connected_marketplaces,
+        'total_products': total_products,
+        'total_orders': total_orders,
+        'total_revenue': total_revenue
+    }
     
-    low_stock_products = cur.fetchall()
+    cur.execute("SELECT * FROM orders")
+    all_orders_data = cur.fetchall()
+    recent_orders = sorted(all_orders_data, key=lambda x: x.get('order_date', ''), reverse=True)[:10]
+    
+    cur.execute("SELECT * FROM products")
+    all_products = cur.fetchall()
+    
+    cur.execute("SELECT * FROM marketplace_products")
+    all_mp_products = cur.fetchall()
+    
+    # Подсчет остатков в Python
+    product_stocks = {}
+    for mp in all_mp_products:
+        p_id = mp['product_id']
+        stock = mp.get('stock', 0)
+        product_stocks[p_id] = product_stocks.get(p_id, 0) + stock
+    
+    low_stock_products = []
+    for p in all_products:
+        p_dict = dict(p)
+        total_stock = product_stocks.get(p['id'], 0)
+        p_dict['total_stock'] = total_stock
+        if total_stock < 10:
+            low_stock_products.append(p_dict)
+    
+    low_stock_products = sorted(low_stock_products, key=lambda x: x['total_stock'])[:10]
     
     cur.close()
     conn.close()
     
     return success_response({
-        'stats': dict(dashboard_stats),
+        'stats': dashboard_stats,
         'recentOrders': [dict(o) for o in recent_orders],
         'lowStockProducts': [dict(p) for p in low_stock_products]
     })

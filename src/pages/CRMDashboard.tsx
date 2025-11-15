@@ -42,17 +42,34 @@ interface LowStockProduct {
 
 const CRMDashboard: React.FC = () => {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('crm_active_tab') || 'dashboard';
+  });
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('crm_settings');
+    return saved ? JSON.parse(saved) : {
+      companyName: 'Интернет-магазин',
+      email: '',
+      currency: 'RUB',
+      notifyOrders: true,
+      notifyStock: true,
+      emailReports: false
+    };
+  });
 
   useEffect(() => {
     loadDashboard();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('crm_active_tab', activeTab);
+  }, [activeTab]);
 
   const loadDashboard = async () => {
     try {
@@ -210,7 +227,7 @@ const CRMDashboard: React.FC = () => {
 
           <TabsContent value="dashboard" className="space-y-6 mt-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('marketplaces')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('marketplaces')} style={{animationDelay: '0ms'}}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Маркетплейсы</p>
@@ -227,7 +244,7 @@ const CRMDashboard: React.FC = () => {
                 </p>
               </Card>
 
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('products')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('products')} style={{animationDelay: '100ms'}}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Товары</p>
@@ -242,7 +259,7 @@ const CRMDashboard: React.FC = () => {
                 </p>
               </Card>
 
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('orders')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('orders')} style={{animationDelay: '200ms'}}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Заказы</p>
@@ -257,7 +274,7 @@ const CRMDashboard: React.FC = () => {
                 </p>
               </Card>
 
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer col-span-2 group" onClick={() => setActiveTab('analytics')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer col-span-2 group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('analytics')} style={{animationDelay: '300ms'}}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Выручка</p>
@@ -375,7 +392,7 @@ const CRMDashboard: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('analytics')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('analytics')} style={{animationDelay: '400ms'}}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="h-12 w-12 bg-blue-500/10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Icon name="LineChart" className="h-6 w-6 text-blue-500" />
@@ -388,7 +405,7 @@ const CRMDashboard: React.FC = () => {
                 </p>
               </Card>
 
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('ai-tools')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('ai-tools')} style={{animationDelay: '500ms'}}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="h-12 w-12 bg-purple-500/10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Icon name="Brain" className="h-6 w-6 text-purple-500" />
@@ -401,7 +418,7 @@ const CRMDashboard: React.FC = () => {
                 </p>
               </Card>
 
-              <Card className="p-6 hover:shadow-lg transition-all cursor-pointer group" onClick={() => setActiveTab('unit-economics')}>
+              <Card className="p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group animate-in fade-in-50 slide-in-from-bottom-3" onClick={() => setActiveTab('unit-economics')} style={{animationDelay: '600ms'}}>
                 <div className="flex items-center justify-between mb-4">
                   <div className="h-12 w-12 bg-green-500/10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Icon name="Calculator" className="h-6 w-6 text-green-500" />
@@ -503,7 +520,8 @@ const CRMDashboard: React.FC = () => {
                     id="company-name" 
                     placeholder="Моя компания" 
                     className="mt-1"
-                    defaultValue="Интернет-магазин"
+                    value={settings.companyName}
+                    onChange={(e) => setSettings({...settings, companyName: e.target.value})}
                   />
                 </div>
                 <div>
@@ -513,6 +531,8 @@ const CRMDashboard: React.FC = () => {
                     type="email"
                     placeholder="email@example.com" 
                     className="mt-1"
+                    value={settings.email}
+                    onChange={(e) => setSettings({...settings, email: e.target.value})}
                   />
                 </div>
                 <div>
@@ -531,23 +551,39 @@ const CRMDashboard: React.FC = () => {
             <div className="pt-4 border-t">
               <h3 className="text-lg font-semibold mb-4">Уведомления</h3>
               <div className="space-y-3">
-                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50 transition-colors">
                   <span className="text-sm">Уведомлять о новых заказах</span>
-                  <input type="checkbox" className="h-4 w-4" defaultChecked />
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4" 
+                    checked={settings.notifyOrders}
+                    onChange={(e) => setSettings({...settings, notifyOrders: e.target.checked})}
+                  />
                 </label>
-                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50 transition-colors">
                   <span className="text-sm">Уведомлять о низких остатках</span>
-                  <input type="checkbox" className="h-4 w-4" defaultChecked />
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4" 
+                    checked={settings.notifyStock}
+                    onChange={(e) => setSettings({...settings, notifyStock: e.target.checked})}
+                  />
                 </label>
-                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50 transition-colors">
                   <span className="text-sm">Отчеты по email</span>
-                  <input type="checkbox" className="h-4 w-4" />
+                  <input 
+                    type="checkbox" 
+                    className="h-4 w-4" 
+                    checked={settings.emailReports}
+                    onChange={(e) => setSettings({...settings, emailReports: e.target.checked})}
+                  />
                 </label>
               </div>
             </div>
 
             <div className="flex gap-3 pt-4">
               <Button className="flex-1" onClick={() => {
+                localStorage.setItem('crm_settings', JSON.stringify(settings));
                 toast({
                   title: 'Настройки сохранены',
                   description: 'Ваши настройки успешно обновлены'
