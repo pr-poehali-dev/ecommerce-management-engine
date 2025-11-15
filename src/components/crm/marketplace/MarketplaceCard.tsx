@@ -1,0 +1,106 @@
+import React from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import Icon from '@/components/ui/icon';
+import { Marketplace, marketplaceInfo } from './types';
+
+interface MarketplaceCardProps {
+  marketplace: Marketplace;
+  formatMoney: (amount: number) => string;
+  onOpenSettings: (marketplace: Marketplace) => void;
+  onOpenConnect: (marketplaceName: string) => void;
+  onSync: (id: number, name: string) => void;
+}
+
+const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
+  marketplace,
+  formatMoney,
+  onOpenSettings,
+  onOpenConnect,
+  onSync
+}) => {
+  const slug = marketplace.slug || marketplace.name.toLowerCase();
+  const info = marketplaceInfo[slug] || marketplaceInfo[marketplace.name] || {
+    logo: '📦',
+    color: 'gray',
+    displayName: marketplace.name
+  };
+
+  return (
+    <Card className="p-6 hover:shadow-lg transition-shadow">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="text-4xl">{info.logo}</div>
+          <div>
+            <h3 className="font-semibold text-lg">{info.displayName}</h3>
+            <span
+              className={`text-xs px-2 py-1 rounded-full ${
+                marketplace.is_connected
+                  ? 'bg-green-500/10 text-green-500'
+                  : 'bg-gray-500/10 text-gray-500'
+              }`}
+            >
+              {marketplace.is_connected ? 'Подключен' : 'Не подключен'}
+            </span>
+          </div>
+        </div>
+        <Button 
+          variant="ghost" 
+          size="sm"
+          onClick={() => onOpenSettings(marketplace)}
+        >
+          <Icon name="Settings" className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Товары</span>
+          <span className="font-semibold">{marketplace.products_count}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Заказы</span>
+          <span className="font-semibold">{marketplace.orders_count}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Выручка</span>
+          <span className="font-semibold">{formatMoney(marketplace.total_revenue || 0)}</span>
+        </div>
+      </div>
+
+      {marketplace.is_connected && (
+        <div className="mt-4 pt-4 border-t">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Icon name="Clock" className="h-3 w-3" />
+            <span>
+              {marketplace.last_sync_at
+                ? `Синхронизировано ${new Date(marketplace.last_sync_at).toLocaleString('ru-RU')}`
+                : 'Не синхронизировано'}
+            </span>
+          </div>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="w-full mt-3"
+            onClick={() => onSync(marketplace.id, marketplace.slug || marketplace.name)}
+          >
+            <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
+            Синхронизировать
+          </Button>
+        </div>
+      )}
+
+      {!marketplace.is_connected && (
+        <Button
+          variant="outline"
+          className="w-full mt-4"
+          onClick={() => onOpenConnect(marketplace.slug || marketplace.name)}
+        >
+          Подключить
+        </Button>
+      )}
+    </Card>
+  );
+};
+
+export default MarketplaceCard;
