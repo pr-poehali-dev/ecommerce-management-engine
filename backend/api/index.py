@@ -287,12 +287,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             cursor.execute(f'SELECT id, name, slug, logo_url, country, api_available, status FROM "{SCHEMA}"."marketplaces" WHERE status = %s ORDER BY name', ('active',))
             marketplaces = cursor.fetchall()
             
-            cursor.execute(f'SELECT marketplace_id, status FROM "{SCHEMA}"."user_marketplace_integrations" WHERE user_id = %s', (user_id,))
-            integrations = cursor.fetchall()
-            integration_map = {i['marketplace_id']: i['status'] for i in integrations}
+            cursor.execute(f'SELECT marketplace_id, api_key, seller_id, store_url, is_active FROM "{SCHEMA}"."user_marketplace_integrations" WHERE user_id = %s', (user_id,))
+            integrations_map = {i['marketplace_id']: i for i in cursor.fetchall()}
             
             result = []
             for m in marketplaces:
+                integration = integrations_map.get(m['id'])
                 result.append({
                     'id': m['id'],
                     'name': m['name'],
@@ -300,8 +300,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'logo': m['logo_url'],
                     'country': m['country'],
                     'apiAvailable': m['api_available'],
-                    'connected': m['id'] in integration_map,
-                    'status': integration_map.get(m['id'], 'not_connected')
+                    'connected': integration is not None and integration.get('is_active', False),
+                    'apiKey': integration.get('api_key', '') if integration else '',
+                    'sellerId': integration.get('seller_id', '') if integration else '',
+                    'storeUrl': integration.get('store_url', '') if integration else ''
                 })
             
             cursor.close()
@@ -311,6 +313,66 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'statusCode': 200,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'marketplaces': result}),
+                'isBase64Encoded': False
+            }
+        
+        elif path == 'marketplaces/connect' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            marketplace_id = body_data.get('marketplaceId')
+            api_key = body_data.get('apiKey', '')
+            api_secret = body_data.get('apiSecret', '')
+            seller_id = body_data.get('sellerId', '')
+            store_url = body_data.get('storeUrl', '')
+            
+            cursor.execute(f'''
+                SELECT id FROM "{SCHEMA}"."user_marketplace_integrations" 
+                WHERE user_id = %s AND marketplace_id = %s
+            ''', (user_id, marketplace_id))
+            existing = cursor.fetchone()
+            
+            if existing:
+                cursor.execute(f'''
+                    UPDATE "{SCHEMA}"."user_marketplace_integrations"
+                    SET api_key = %s, api_secret = %s, seller_id = %s, store_url = %s, 
+                        is_active = true, connected_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s AND marketplace_id = %s
+                ''', (api_key, api_secret, seller_id, store_url, user_id, marketplace_id))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO "{SCHEMA}"."user_marketplace_integrations" 
+                    (user_id, marketplace_id, api_key, api_secret, seller_id, store_url, is_active, connected_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, true, CURRENT_TIMESTAMP)
+                ''', (user_id, marketplace_id, api_key, api_secret, seller_id, store_url))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'success': True, 'message': 'Marketplace connected successfully'}),
+                'isBase64Encoded': False
+            }
+        
+        elif path == 'marketplaces/disconnect' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            marketplace_id = body_data.get('marketplaceId')
+            
+            cursor.execute(f'''
+                UPDATE "{SCHEMA}"."user_marketplace_integrations"
+                SET is_active = false
+                WHERE user_id = %s AND marketplace_id = %s
+            ''', (user_id, marketplace_id))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'success': True, 'message': 'Marketplace disconnected successfully'}),
                 'isBase64Encoded': False
             }
         

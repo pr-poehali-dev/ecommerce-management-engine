@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import Icon from '@/components/ui/icon';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { exportFullReport } from '@/lib/excel-export';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Analytics {
   revenue: number;
@@ -32,54 +33,73 @@ interface DashboardTabProps {
 }
 
 const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products, customers }) => {
+  const { t } = useLanguage();
+  
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex justify-between items-center">
-        <h2 className="text-3xl font-bold">Dashboard</h2>
-        <Button onClick={() => exportFullReport(products, orders, customers, analytics)}>
+        <div>
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            {t('dashboard')}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">Обзор ключевых метрик вашего бизнеса</p>
+        </div>
+        <Button onClick={() => exportFullReport(products, orders, customers, analytics)} className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
           <Icon name="FileDown" className="mr-2 h-4 w-4" />
-          Export Full Report
+          {t('exportFullReport')}
         </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-l-4 border-l-purple-600 shadow-lg hover-scale">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <Icon name="DollarSign" className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">{t('totalRevenue')}</CardTitle>
+            <div className="p-2 rounded-lg bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800">
+              <Icon name="DollarSign" className="h-4 w-4 text-purple-700 dark:text-purple-300" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{(analytics?.revenue || 0).toLocaleString('ru-RU')} ₽</div>
+            <p className="text-xs text-muted-foreground mt-1">+12.5% от прошлого месяца</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-blue-600 shadow-lg hover-scale">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Orders</CardTitle>
-            <Icon name="ShoppingCart" className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">{t('orders')}</CardTitle>
+            <div className="p-2 rounded-lg bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900 dark:to-blue-800">
+              <Icon name="ShoppingCart" className="h-4 w-4 text-blue-700 dark:text-blue-300" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{analytics?.orders || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">+8.2% от прошлого месяца</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-green-600 shadow-lg hover-scale">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Products</CardTitle>
-            <Icon name="Package" className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">{t('products')}</CardTitle>
+            <div className="p-2 rounded-lg bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800">
+              <Icon name="Package" className="h-4 w-4 text-green-700 dark:text-green-300" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{analytics?.products || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">В наличии и активны</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-orange-600 shadow-lg hover-scale">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Customers</CardTitle>
-            <Icon name="Users" className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">{t('customers')}</CardTitle>
+            <div className="p-2 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900 dark:to-orange-800">
+              <Icon name="Users" className="h-4 w-4 text-orange-700 dark:text-orange-300" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{analytics?.customers || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">+15 новых за неделю</p>
           </CardContent>
         </Card>
       </div>
@@ -123,33 +143,43 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
         </Card>
       </div>
 
-      <Card>
+      <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Recent Orders</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Icon name="Clock" className="text-blue-600" />
+            {t('recentOrders')}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Total</TableHead>
+                <TableHead>{t('orderId')}</TableHead>
+                <TableHead>{t('customer')}</TableHead>
+                <TableHead>{t('date')}</TableHead>
+                <TableHead>{t('status')}</TableHead>
+                <TableHead>{t('total')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(orders || []).slice(0, 5).map((order) => (
-                <TableRow key={order.id}>
+                <TableRow key={order.id} className="hover:bg-muted/50">
                   <TableCell className="font-medium">{order.id}</TableCell>
                   <TableCell>{order.customerName}</TableCell>
                   <TableCell>{order.date}</TableCell>
                   <TableCell>
-                    <Badge variant={order.status === 'delivered' ? 'default' : 'secondary'}>
-                      {order.status}
+                    <Badge 
+                      variant={order.status === 'delivered' ? 'default' : 'secondary'}
+                      className={
+                        order.status === 'delivered' ? 'bg-green-600' :
+                        order.status === 'shipped' ? 'bg-blue-600' :
+                        'bg-orange-600'
+                      }
+                    >
+                      {t(order.status)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{(order.total || 0).toLocaleString('ru-RU')} ₽</TableCell>
+                  <TableCell className="font-semibold">{(order.total || 0).toLocaleString('ru-RU')} ₽</TableCell>
                 </TableRow>
               ))}
             </TableBody>

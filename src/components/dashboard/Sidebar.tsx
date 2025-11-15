@@ -1,5 +1,7 @@
 import React from 'react';
 import Icon from '@/components/ui/icon';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { Button } from '@/components/ui/button';
 
 interface SidebarProps {
   activeTab: string;
@@ -7,36 +9,40 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+  const { t, language, setLanguage } = useLanguage();
+  
   const menuItems = [
-    { id: 'dashboard', icon: 'LayoutDashboard', label: 'Dashboard' },
-    { id: 'products', icon: 'Package', label: 'Products' },
-    { id: 'orders', icon: 'ShoppingCart', label: 'Orders' },
-    { id: 'customers', icon: 'Users', label: 'Customers' },
-    { id: 'marketplaces', icon: 'Globe', label: 'Marketplaces' },
-    { id: 'profile', icon: 'User', label: 'Profile' }
+    { id: 'dashboard', icon: 'LayoutDashboard', label: t('dashboard') },
+    { id: 'aiInsights', icon: 'Sparkles', label: t('aiInsights') },
+    { id: 'automation', icon: 'Zap', label: t('automation') },
+    { id: 'products', icon: 'Package', label: t('products') },
+    { id: 'orders', icon: 'ShoppingCart', label: t('orders') },
+    { id: 'customers', icon: 'Users', label: t('customers') },
+    { id: 'marketplaces', icon: 'Globe', label: t('marketplaces') },
+    { id: 'profile', icon: 'User', label: t('profile') }
   ];
 
   return (
-    <aside className="w-64 min-h-screen bg-card border-r">
+    <aside className="w-64 min-h-screen bg-gradient-to-b from-card to-background border-r">
       <div className="p-6">
         <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <Icon name="Store" className="text-primary-foreground" size={24} />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg">
+            <Icon name="Store" className="text-white" size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-bold">SellHub</h1>
-            <p className="text-xs text-muted-foreground">E-commerce Platform</p>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">SellHub</h1>
+            <p className="text-xs text-muted-foreground">AI-Powered Platform</p>
           </div>
         </div>
 
-        <nav className="space-y-1">
+        <nav className="space-y-1 mb-6">
           {menuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                 activeTab === item.id
-                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
@@ -45,6 +51,27 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
             </button>
           ))}
         </nav>
+
+        <div className="pt-4 border-t">
+          <div className="flex gap-1 p-1 bg-muted rounded-lg">
+            <Button
+              variant={language === 'ru' ? 'default' : 'ghost'}
+              size="sm"
+              className="flex-1"
+              onClick={() => setLanguage('ru')}
+            >
+              RU
+            </Button>
+            <Button
+              variant={language === 'en' ? 'default' : 'ghost'}
+              size="sm"
+              className="flex-1"
+              onClick={() => setLanguage('en')}
+            >
+              EN
+            </Button>
+          </div>
+        </div>
       </div>
     </aside>
   );

@@ -4,6 +4,9 @@ import Sidebar from '@/components/dashboard/Sidebar';
 import DashboardTab from '@/components/dashboard/DashboardTab';
 import ProductsTab from '@/components/dashboard/ProductsTab';
 import OtherTabs from '@/components/dashboard/OtherTabs';
+import AIInsightsTab from '@/components/dashboard/AIInsightsTab';
+import AutomationTab from '@/components/dashboard/AutomationTab';
+import MarketplaceConnectDialog from '@/components/dashboard/MarketplaceConnectDialog';
 
 const API_URL = 'https://functions.poehali.dev/26680cc3-0053-45ae-ac6a-1c7a3c94505c';
 
@@ -87,6 +90,8 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
   });
 
   const [userInfo, setUserInfo] = useState({ email: '', name: '' });
+  const [connectDialog, setConnectDialog] = useState(false);
+  const [selectedMarketplace, setSelectedMarketplace] = useState<Marketplace | null>(null);
 
   useEffect(() => {
     const email = localStorage.getItem('userEmail') || '';
@@ -244,8 +249,25 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
     setProductDialog(true);
   };
 
-  const handleConnectMarketplace = (marketplaceName: string) => {
-    toast({ title: 'Info', description: `Connecting to ${marketplaceName}...` });
+  const handleConnectMarketplace = (marketplace: Marketplace) => {
+    setSelectedMarketplace(marketplace);
+    setConnectDialog(true);
+  };
+
+  const handleMarketplaceConnect = async (marketplaceId: string, credentials: any) => {
+    try {
+      const response = await fetch(`${API_URL}?path=marketplaces/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketplaceId, ...credentials })
+      });
+      if (response.ok) {
+        toast({ title: 'Success', description: 'Marketplace connected successfully' });
+        fetchMarketplaces();
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to connect marketplace', variant: 'destructive' });
+    }
   };
 
   return (
@@ -283,6 +305,10 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
             />
           )}
 
+          {activeTab === 'aiInsights' && <AIInsightsTab />}
+          
+          {activeTab === 'automation' && <AutomationTab />}
+
           {(activeTab === 'orders' || activeTab === 'customers' || activeTab === 'marketplaces' || activeTab === 'profile') && (
             <OtherTabs
               activeTab={activeTab}
@@ -298,6 +324,13 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
           )}
         </div>
       </main>
+
+      <MarketplaceConnectDialog
+        open={connectDialog}
+        onOpenChange={setConnectDialog}
+        marketplace={selectedMarketplace}
+        onConnect={handleMarketplaceConnect}
+      />
     </div>
   );
 };

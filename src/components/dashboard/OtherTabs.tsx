@@ -45,7 +45,7 @@ interface OtherTabsProps {
   customers: Customer[];
   marketplaces: Marketplace[];
   userInfo: { email: string; name: string };
-  handleConnectMarketplace: (name: string) => void;
+  handleConnectMarketplace: (marketplace: Marketplace) => void;
   onLogout: () => void;
 }
 
@@ -194,7 +194,7 @@ const OtherTabs: React.FC<OtherTabsProps> = ({
                 <Button
                   className="w-full"
                   variant={marketplace.connected ? 'outline' : 'default'}
-                  onClick={() => handleConnectMarketplace(marketplace.name)}
+                  onClick={() => handleConnectMarketplace(marketplace)}
                 >
                   {marketplace.connected ? 'Manage' : 'Connect'}
                 </Button>
