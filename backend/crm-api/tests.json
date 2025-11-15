@@ -6,7 +6,8 @@
       "path": "/?action=getMarketplaces",
       "expectedStatus": 200,
       "expectedBody": {
-        "marketplaces": "array"
+        "marketplaces": "array",
+        "total": "number"
       },
       "bodyMatcher": "partial"
     },

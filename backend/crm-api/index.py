@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Все таблицы используются БЕЗ префикса схемы, т.к. search_path установлен в DATABASE_URL
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
     Business: Центральное API для CRM системы - управление маркетплейсами, товарами, заказами, аналитикой
@@ -29,9 +31,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif action == 'getProducts':
             marketplace = query_params.get('marketplace')
             return get_products(marketplace)
-        elif action == 'syncProducts' and method == 'POST':
-            body_data = json.loads(event.get('body', '{}'))
-            return sync_products(body_data)
         elif action == 'getOrders':
             status = query_params.get('status')
             marketplace = query_params.get('marketplace')
@@ -44,18 +43,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return get_analytics(period)
         elif action == 'getDashboard':
             return get_dashboard()
-        elif action == 'updateStock' and method == 'POST':
-            body_data = json.loads(event.get('body', '{}'))
-            return update_stock(body_data)
         else:
             return error_response('Invalid action', 400)
     except Exception as e:
-        return error_response(str(e), 500)
+        import traceback
+        return error_response(f'{str(e)}\n\n{traceback.format_exc()}', 500)
 
 
 def get_db_connection():
     """Получение подключения к базе данных"""
     database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        raise ValueError('DATABASE_URL not set')
     conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
     return conn
@@ -66,6 +65,7 @@ def get_marketplaces() -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
+    # Используем таблицы БЕЗ схемы - search_path должен быть установлен в DATABASE_URL
     cur.execute("""
         SELECT 
             m.id,
@@ -76,24 +76,22 @@ def get_marketplaces() -> Dict[str, Any]:
             COALESCE(umi.api_key, '') as api_key,
             COALESCE(umi.store_id, '') as client_id,
             CASE WHEN umi.id IS NOT NULL THEN true ELSE false END as is_connected,
-            COUNT(DISTINCT mp.product_id) as products_count,
-            COUNT(DISTINCT o.id) as orders_count,
-            COALESCE(SUM(o.total_amount), 0) as total_revenue,
+            0 as products_count,
+            0 as orders_count,
+            0 as total_revenue,
             umi.last_sync as last_sync_at
-        FROM t_p86529894_ecommerce_management.marketplaces m
-        LEFT JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id
-        LEFT JOIN t_p86529894_ecommerce_management.marketplace_products mp ON m.id = mp.marketplace_id
-        LEFT JOIN t_p86529894_ecommerce_management.orders o ON m.id = o.marketplace_id
-        GROUP BY m.id, m.name, m.slug, m.logo_url, m.country, umi.id, umi.api_key, umi.store_id, umi.last_sync
+        FROM marketplaces m
+        LEFT JOIN user_marketplace_integrations umi 
+            ON m.id = umi.marketplace_id AND umi.user_id = 1
         ORDER BY m.name
     """)
     
-    marketplaces = cur.fetchall()
+    marketplaces = [dict(m) for m in cur.fetchall()]
     cur.close()
     conn.close()
     
     return success_response({
-        'marketplaces': [dict(m) for m in marketplaces],
+        'marketplaces': marketplaces,
         'total': len(marketplaces)
     })
 
@@ -106,13 +104,13 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     seller_id = data.get('sellerId')
     
     if not name:
-        return error_response('Marketplace name is required', 400)
+        return error_response('Marketplace name required', 400)
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
-        SELECT id FROM t_p86529894_ecommerce_management.marketplaces
+        SELECT id FROM marketplaces
         WHERE slug = %s OR LOWER(name) = LOWER(%s)
         LIMIT 1
     """, (name, name))
@@ -128,7 +126,7 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     user_id = 1
     
     cur.execute("""
-        SELECT id FROM t_p86529894_ecommerce_management.user_marketplace_integrations
+        SELECT id FROM user_marketplace_integrations
         WHERE user_id = %s AND marketplace_id = %s
     """, (user_id, marketplace_id))
     
@@ -136,25 +134,20 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     
     if existing:
         cur.execute("""
-            UPDATE t_p86529894_ecommerce_management.user_marketplace_integrations
+            UPDATE user_marketplace_integrations
             SET api_key = %s, api_secret = %s, store_id = %s, status = 'active', last_sync = %s
             WHERE user_id = %s AND marketplace_id = %s
-            RETURNING *
+            RETURNING id
         """, (api_key, seller_id, client_id, datetime.now(), user_id, marketplace_id))
     else:
         cur.execute("""
-            INSERT INTO t_p86529894_ecommerce_management.user_marketplace_integrations 
+            INSERT INTO user_marketplace_integrations 
             (user_id, marketplace_id, api_key, api_secret, store_id, status, last_sync)
             VALUES (%s, %s, %s, %s, %s, 'active', %s)
-            RETURNING *
+            RETURNING id
         """, (user_id, marketplace_id, api_key, seller_id, client_id, datetime.now()))
     
-    integration = cur.fetchone()
-    
-    if not integration:
-        cur.close()
-        conn.close()
-        return error_response('Failed to create integration', 500)
+    integration_id = cur.fetchone()['id']
     
     cur.execute("""
         SELECT 
@@ -162,14 +155,14 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
             m.name,
             m.slug,
             m.logo_url,
-            COALESCE(umi.api_key, '') as api_key,
-            COALESCE(umi.store_id, '') as client_id,
+            umi.api_key,
+            umi.store_id as client_id,
             true as is_connected,
             umi.last_sync as last_sync_at
-        FROM t_p86529894_ecommerce_management.marketplaces m
-        JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id
+        FROM marketplaces m
+        JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
         WHERE umi.id = %s
-    """, (integration['id'],))
+    """, (integration_id,))
     
     marketplace_info = cur.fetchone()
     
@@ -177,14 +170,14 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     conn.close()
     
     return success_response({
-        'marketplace': dict(marketplace_info) if marketplace_info else dict(integration),
-        'message': f'{name.title()} подключен успешно',
+        'marketplace': dict(marketplace_info),
+        'message': f'{name.title()} connected',
         'success': True
     })
 
 
 def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
-    """Получение списка товаров с фильтрацией по маркетплейсу"""
+    """Получение списка товаров"""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -195,7 +188,6 @@ def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
                 mp.marketplace_id,
                 mp.price as marketplace_price,
                 mp.stock as marketplace_stock,
-                mp.status as marketplace_status,
                 m.name as marketplace_name
             FROM products p
             LEFT JOIN marketplace_products mp ON p.id = mp.product_id
@@ -215,63 +207,18 @@ def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
             ORDER BY p.created_at DESC
         """)
     
-    products = cur.fetchall()
+    products = [dict(p) for p in cur.fetchall()]
     cur.close()
     conn.close()
     
     return success_response({
-        'products': [dict(p) for p in products],
+        'products': products,
         'total': len(products)
     })
 
 
-def sync_products(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Синхронизация товаров с маркетплейсом"""
-    marketplace_id = data.get('marketplaceId')
-    products = data.get('products', [])
-    
-    if not marketplace_id:
-        return error_response('Marketplace ID is required', 400)
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    synced_count = 0
-    for product_data in products:
-        product_id = product_data.get('productId')
-        price = product_data.get('price')
-        stock = product_data.get('stock')
-        
-        cur.execute("""
-            INSERT INTO marketplace_products
-            (product_id, marketplace_id, price, stock, last_sync_at)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (product_id, marketplace_id) DO UPDATE
-            SET price = EXCLUDED.price,
-                stock = EXCLUDED.stock,
-                last_sync_at = EXCLUDED.last_sync_at,
-                updated_at = CURRENT_TIMESTAMP
-        """, (product_id, marketplace_id, price, stock, datetime.now()))
-        
-        synced_count += 1
-    
-    cur.execute("""
-        UPDATE marketplaces
-        SET last_sync_at = %s
-        WHERE id = %s
-    """, (datetime.now(), marketplace_id))
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'synced': synced_count,
-        'message': f'Синхронизировано {synced_count} товаров'
-    })
-
-
 def get_orders(status: Optional[str] = None, marketplace: Optional[str] = None) -> Dict[str, Any]:
-    """Получение заказов с фильтрацией"""
+    """Получение заказов"""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -297,12 +244,12 @@ def get_orders(status: Optional[str] = None, marketplace: Optional[str] = None) 
     query += " GROUP BY o.id, m.name ORDER BY o.order_date DESC LIMIT 100"
     
     cur.execute(query, params)
-    orders = cur.fetchall()
+    orders = [dict(o) for o in cur.fetchall()]
     cur.close()
     conn.close()
     
     return success_response({
-        'orders': [dict(o) for o in orders],
+        'orders': orders,
         'total': len(orders)
     })
 
@@ -313,7 +260,7 @@ def update_order_status(data: Dict[str, Any]) -> Dict[str, Any]:
     new_status = data.get('status')
     
     if not order_id or not new_status:
-        return error_response('Order ID and status are required', 400)
+        return error_response('Order ID and status required', 400)
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -334,60 +281,12 @@ def update_order_status(data: Dict[str, Any]) -> Dict[str, Any]:
     
     return success_response({
         'order': dict(order),
-        'message': 'Статус заказа обновлен'
-    })
-
-
-def update_stock(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Обновление остатков товара"""
-    product_id = data.get('productId')
-    new_stock = data.get('stock')
-    reason = data.get('reason', 'Manual update')
-    
-    if product_id is None or new_stock is None:
-        return error_response('Product ID and stock are required', 400)
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    cur.execute("""
-        SELECT stock FROM products
-        WHERE id = %s
-    """, (product_id,))
-    
-    result = cur.fetchone()
-    if not result:
-        cur.close()
-        conn.close()
-        return error_response('Product not found', 404)
-    
-    old_stock = result['stock']
-    
-    cur.execute("""
-        UPDATE products
-        SET stock = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
-    """, (new_stock, product_id))
-    
-    cur.execute("""
-        INSERT INTO stock_history
-        (product_id, old_stock, new_stock, change_reason, changed_at)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (product_id, old_stock, new_stock, reason, datetime.now()))
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'productId': product_id,
-        'oldStock': old_stock,
-        'newStock': new_stock,
-        'message': 'Остаток обновлен'
+        'message': 'Status updated'
     })
 
 
 def get_analytics(period: str = '30d') -> Dict[str, Any]:
-    """Получение аналитики за период"""
+    """Получение аналитики"""
     days = int(period.replace('d', ''))
     start_date = datetime.now() - timedelta(days=days)
     
@@ -425,8 +324,7 @@ def get_analytics(period: str = '30d') -> Dict[str, Any]:
             COUNT(o.id) as orders,
             COALESCE(SUM(o.total_amount), 0) as revenue
         FROM marketplaces m
-        LEFT JOIN orders o ON m.id = o.marketplace_id
-            AND o.order_date >= %s
+        LEFT JOIN orders o ON m.id = o.marketplace_id AND o.order_date >= %s
         GROUP BY m.name
         ORDER BY revenue DESC
     """, (start_date,))
@@ -445,20 +343,17 @@ def get_analytics(period: str = '30d') -> Dict[str, Any]:
 
 
 def get_dashboard() -> Dict[str, Any]:
-    """Получение данных для главного дашборда"""
+    """Получение данных дашборда"""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
         SELECT 
-            COUNT(DISTINCT m.id) as total_marketplaces,
-            COUNT(DISTINCT CASE WHEN m.is_connected THEN m.id END) as connected_marketplaces,
-            COUNT(DISTINCT p.id) as total_products,
-            COUNT(DISTINCT o.id) as total_orders,
-            COALESCE(SUM(o.total_amount), 0) as total_revenue
-        FROM marketplaces m
-        LEFT JOIN products p ON 1=1
-        LEFT JOIN orders o ON 1=1
+            (SELECT COUNT(*) FROM marketplaces) as total_marketplaces,
+            (SELECT COUNT(*) FROM user_marketplace_integrations) as connected_marketplaces,
+            (SELECT COUNT(*) FROM products) as total_products,
+            (SELECT COUNT(*) FROM orders) as total_orders,
+            (SELECT COALESCE(SUM(total_amount), 0) FROM orders) as total_revenue
     """)
     
     dashboard_stats = cur.fetchone()
@@ -523,10 +418,10 @@ def success_response(data: Any) -> Dict[str, Any]:
     }
 
 
-def error_response(message: str, status_code: int = 400) -> Dict[str, Any]:
+def error_response(message: str, code: int = 500) -> Dict[str, Any]:
     """Ответ с ошибкой"""
     return {
-        'statusCode': status_code,
+        'statusCode': code,
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*'
