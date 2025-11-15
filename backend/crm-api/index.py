@@ -91,7 +91,7 @@ def get_db_connection():
     if not database_url:
         raise ValueError('DATABASE_URL not set')
     
-    conn = psycopg2.connect(database_url, options='-c search_path=t_p86529894_ecommerce_management,public')
+    conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
     return conn
 
@@ -460,27 +460,21 @@ def get_marketplace_specific_data(marketplace_id: Optional[str] = None) -> Dict[
 
 def get_marketplaces() -> Dict[str, Any]:
     """Получение списка всех маркетплейсов"""
+    
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
-        SELECT m.id, m.name, m.slug, m.logo_url, m.description
-        FROM marketplaces m
-        ORDER BY m.id
-    """)
+    cur.execute("SELECT * FROM t_p86529894_ecommerce_management.marketplaces ORDER BY id")
     marketplaces_raw = [dict(row) for row in cur.fetchall()]
     
-    cur.execute("""
-        SELECT marketplace_id, id, last_sync_at
-        FROM user_marketplace_integrations
-        WHERE user_id = 1
-    """)
+    cur.execute("SELECT * FROM t_p86529894_ecommerce_management.user_marketplace_integrations WHERE user_id = 1")
     integrations = {row['marketplace_id']: dict(row) for row in cur.fetchall()}
     
-    cur.execute("SELECT marketplace_id FROM marketplace_products")
-    mp_products = [row['marketplace_id'] for row in cur.fetchall()]
+    cur.execute("SELECT * FROM t_p86529894_ecommerce_management.marketplace_products")
+    mp_rows = cur.fetchall()
+    mp_products = [row['marketplace_id'] for row in mp_rows] if mp_rows else []
     
-    cur.execute("SELECT marketplace_id, total_amount FROM orders WHERE marketplace_id IS NOT NULL")
+    cur.execute("SELECT * FROM t_p86529894_ecommerce_management.orders WHERE marketplace_id IS NOT NULL")
     orders_data = cur.fetchall()
     
     product_counts = {}
@@ -500,11 +494,11 @@ def get_marketplaces() -> Dict[str, Any]:
         integration = integrations.get(mp_id)
         
         marketplaces.append({
-            'id': mp['id'],
-            'name': mp['name'],
-            'slug': mp['slug'],
-            'logo_url': mp['logo_url'],
-            'description': mp['description'],
+            'id': mp.get('id'),
+            'name': mp.get('name'),
+            'slug': mp.get('slug'),
+            'logo_url': mp.get('logo_url'),
+            'status': mp.get('status', 'active'),
             'is_connected': integration is not None,
             'last_sync_at': integration['last_sync_at'] if integration else None,
             'total_products': product_counts.get(mp_id, 0),
