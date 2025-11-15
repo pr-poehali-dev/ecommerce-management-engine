@@ -150,12 +150,36 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
         """, (user_id, marketplace_id, api_key, seller_id, client_id, datetime.now()))
     
     integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Failed to create integration', 500)
+    
+    cur.execute("""
+        SELECT 
+            m.id,
+            m.name,
+            m.slug,
+            m.logo_url,
+            COALESCE(umi.api_key, '') as api_key,
+            COALESCE(umi.store_id, '') as client_id,
+            true as is_connected,
+            umi.last_sync as last_sync_at
+        FROM t_p86529894_ecommerce_management.marketplaces m
+        JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id
+        WHERE umi.id = %s
+    """, (integration['id'],))
+    
+    marketplace_info = cur.fetchone()
+    
     cur.close()
     conn.close()
     
     return success_response({
-        'marketplace': dict(integration),
-        'message': f'{name} подключен успешно'
+        'marketplace': dict(marketplace_info) if marketplace_info else dict(integration),
+        'message': f'{name.title()} подключен успешно',
+        'success': True
     })
 
 

@@ -60,6 +60,7 @@ const marketplaceInfo: Record<string, { logo: string; color: string; displayName
 const MarketplacesPanel: React.FC = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([]);
   const [connectDialog, setConnectDialog] = useState(false);
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>('');
@@ -79,10 +80,20 @@ const MarketplacesPanel: React.FC = () => {
       const response = await fetch(`${CRM_API}/?action=getMarketplaces`);
       const data = await response.json();
       
+      console.log('Marketplaces loaded:', data);
+      
       if (data.marketplaces) {
         setMarketplaces(data.marketplaces);
+      } else if (data.error) {
+        console.error('API Error:', data.error);
+        toast({
+          title: 'Ошибка API',
+          description: data.error,
+          variant: 'destructive'
+        });
       }
     } catch (error) {
+      console.error('Load error:', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось загрузить маркетплейсы',
@@ -94,33 +105,64 @@ const MarketplacesPanel: React.FC = () => {
   };
 
   const handleConnect = async () => {
+    if (!credentials.apiKey || !credentials.clientId) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните обязательные поля',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     try {
+      setConnecting(true);
+      
+      console.log('Connecting marketplace:', selectedMarketplace);
+      console.log('Credentials:', { apiKey: credentials.apiKey?.slice(0, 10) + '...', clientId: credentials.clientId });
+      
       const response = await fetch(`${CRM_API}/?action=connectMarketplace`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: selectedMarketplace,
-          ...credentials
+          apiKey: credentials.apiKey,
+          clientId: credentials.clientId,
+          sellerId: credentials.sellerId || ''
         })
       });
 
       const data = await response.json();
+      console.log('Connect response:', data);
       
-      if (data.marketplace) {
+      if (response.ok && data.marketplace) {
         toast({
-          title: 'Успешно',
-          description: data.message || 'Маркетплейс подключен'
+          title: '✅ Успешно подключено!',
+          description: `${marketplaceInfo[selectedMarketplace]?.displayName || selectedMarketplace} успешно подключен`
         });
+        
         setConnectDialog(false);
+        setSelectedMarketplace('');
         setCredentials({ apiKey: '', clientId: '', sellerId: '' });
-        loadMarketplaces();
+        
+        setTimeout(() => {
+          loadMarketplaces();
+        }, 500);
+      } else {
+        toast({
+          title: 'Ошибка подключения',
+          description: data.error || data.message || 'Не удалось подключить маркетплейс',
+          variant: 'destructive'
+        });
       }
     } catch (error) {
+      console.error('Connect error:', error);
       toast({
         title: 'Ошибка',
-        description: 'Не удалось подключить маркетплейс',
+        description: 'Произошла ошибка при подключении. Проверьте консоль.',
         variant: 'destructive'
       });
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -267,10 +309,19 @@ const MarketplacesPanel: React.FC = () => {
                     <Button 
                       onClick={handleConnect} 
                       className="flex-1"
-                      disabled={!credentials.apiKey || !credentials.clientId}
+                      disabled={!credentials.apiKey || !credentials.clientId || connecting}
                     >
-                      <Icon name="Link" className="mr-2 h-4 w-4" />
-                      Подключить маркетплейс
+                      {connecting ? (
+                        <>
+                          <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2" />
+                          Подключаю...
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="Link" className="mr-2 h-4 w-4" />
+                          Подключить маркетплейс
+                        </>
+                      )}
                     </Button>
                     <Button 
                       variant="outline" 
@@ -278,6 +329,7 @@ const MarketplacesPanel: React.FC = () => {
                         setSelectedMarketplace('');
                         setCredentials({ apiKey: '', clientId: '', sellerId: '' });
                       }}
+                      disabled={connecting}
                     >
                       Отмена
                     </Button>
