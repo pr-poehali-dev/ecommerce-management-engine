@@ -49,7 +49,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
             <Icon name="DollarSign" className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.revenue.toLocaleString('ru-RU')} ₽</div>
+            <div className="text-2xl font-bold">{(analytics?.revenue || 0).toLocaleString('ru-RU')} ₽</div>
           </CardContent>
         </Card>
 
@@ -59,7 +59,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
             <Icon name="ShoppingCart" className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.orders}</div>
+            <div className="text-2xl font-bold">{analytics?.orders || 0}</div>
           </CardContent>
         </Card>
 
@@ -69,7 +69,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
             <Icon name="Package" className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.products}</div>
+            <div className="text-2xl font-bold">{analytics?.products || 0}</div>
           </CardContent>
         </Card>
 
@@ -79,7 +79,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
             <Icon name="Users" className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{analytics.customers}</div>
+            <div className="text-2xl font-bold">{analytics?.customers || 0}</div>
           </CardContent>
         </Card>
       </div>
@@ -91,7 +91,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={analytics.revenueData}>
+              <LineChart data={analytics?.revenueData || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
@@ -109,7 +109,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={analytics.ordersData}>
+              <BarChart data={analytics?.ordersData || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
@@ -139,7 +139,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.slice(0, 5).map((order) => (
+              {(orders || []).slice(0, 5).map((order) => (
                 <TableRow key={order.id}>
                   <TableCell className="font-medium">{order.id}</TableCell>
                   <TableCell>{order.customerName}</TableCell>
@@ -149,7 +149,7 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
                       {order.status}
                     </Badge>
                   </TableCell>
-                  <TableCell>{order.total.toLocaleString('ru-RU')} ₽</TableCell>
+                  <TableCell>{(order.total || 0).toLocaleString('ru-RU')} ₽</TableCell>
                 </TableRow>
               ))}
             </TableBody>
