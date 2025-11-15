@@ -4,6 +4,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import urllib.request
+import urllib.error
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
@@ -73,6 +75,193 @@ def get_db_connection():
     return conn
 
 
+def call_ozon_api(endpoint: str, client_id: str, api_key: str, method: str = 'POST', data: Optional[Dict] = None) -> Dict[str, Any]:
+    """Вызов Ozon Seller API"""
+    url = f'https://api-seller.ozon.ru{endpoint}'
+    
+    headers = {
+        'Client-Id': client_id,
+        'Api-Key': api_key,
+        'Content-Type': 'application/json'
+    }
+    
+    req_data = json.dumps(data or {}).encode('utf-8')
+    request = urllib.request.Request(url, data=req_data, headers=headers, method=method)
+    
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8')
+        raise Exception(f'Ozon API Error {e.code}: {error_body}')
+    except Exception as e:
+        raise Exception(f'Ozon API Request failed: {str(e)}')
+
+
+def call_wildberries_api(endpoint: str, api_key: str, method: str = 'GET', data: Optional[Dict] = None) -> Any:
+    """Вызов Wildberries Seller API"""
+    url = f'https://suppliers-api.wildberries.ru{endpoint}'
+    
+    headers = {
+        'Authorization': api_key,
+        'Content-Type': 'application/json'
+    }
+    
+    req_data = json.dumps(data).encode('utf-8') if data else None
+    request = urllib.request.Request(url, data=req_data, headers=headers, method=method)
+    
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            content = response.read().decode('utf-8')
+            if content:
+                return json.loads(content)
+            return {}
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8')
+        raise Exception(f'Wildberries API Error {e.code}: {error_body}')
+    except Exception as e:
+        raise Exception(f'Wildberries API Request failed: {str(e)}')
+
+
+def sync_ozon_products(marketplace_id: int, client_id: str, api_key: str, conn, cur) -> int:
+    """Синхронизация товаров с Ozon"""
+    try:
+        response = call_ozon_api('/v2/product/list', client_id, api_key, data={
+            'filter': {'visibility': 'ALL'},
+            'limit': 100
+        })
+        
+        products = response.get('result', {}).get('items', [])
+        synced = 0
+        
+        for item in products:
+            product_id = item.get('product_id')
+            if not product_id:
+                continue
+            
+            info_response = call_ozon_api('/v2/product/info', client_id, api_key, data={
+                'product_id': product_id
+            })
+            
+            product_info = info_response.get('result', {})
+            
+            name = (product_info.get('name') or 'Товар без названия').replace("'", "''")
+            sku = (product_info.get('offer_id') or f'OZON-{product_id}').replace("'", "''")
+            price = float(product_info.get('price') or 0)
+            stock = int(product_info.get('stocks', {}).get('present', 0))
+            category = (product_info.get('category_name') or 'Без категории').replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM products WHERE sku = '{sku}' LIMIT 1")
+            existing = cur.fetchone()
+            
+            if existing:
+                db_product_id = existing['id']
+                cur.execute(f"""
+                    UPDATE products
+                    SET name = '{name}', price = {price}, stock = {stock}, 
+                        category = '{category}', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {db_product_id}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO products (name, sku, price, stock, category)
+                    VALUES ('{name}', '{sku}', {price}, {stock}, '{category}')
+                    RETURNING id
+                """)
+                db_product_id = cur.fetchone()['id']
+            
+            cur.execute(f"""
+                SELECT id FROM marketplace_products 
+                WHERE product_id = {db_product_id} AND marketplace_id = {marketplace_id}
+            """)
+            
+            if cur.fetchone():
+                cur.execute(f"""
+                    UPDATE marketplace_products
+                    SET price = {price}, stock = {stock}, synced_at = CURRENT_TIMESTAMP
+                    WHERE product_id = {db_product_id} AND marketplace_id = {marketplace_id}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
+                    VALUES ({db_product_id}, {marketplace_id}, {price}, {stock}, CURRENT_TIMESTAMP)
+                """)
+            
+            synced += 1
+        
+        return synced
+    except Exception as e:
+        raise Exception(f'Ozon sync failed: {str(e)}')
+
+
+def sync_wildberries_products(marketplace_id: int, api_key: str, conn, cur) -> int:
+    """Синхронизация товаров с Wildberries"""
+    try:
+        response = call_wildberries_api('/content/v1/cards/cursor/list', api_key, method='POST', data={
+            'sort': {'cursor': {'limit': 100}},
+            'filter': {'withPhoto': -1}
+        })
+        
+        cards = response.get('data', {}).get('cards', [])
+        synced = 0
+        
+        for card in cards:
+            nm_id = card.get('nmID')
+            if not nm_id:
+                continue
+            
+            name = (card.get('title') or 'Товар без названия').replace("'", "''")
+            sku = f'WB-{nm_id}'
+            
+            sizes = card.get('sizes', [])
+            price = float(sizes[0].get('price', 0)) if sizes else 0
+            stock = sum(int(s.get('stocks', [{}])[0].get('qty', 0)) for s in sizes)
+            
+            category = (card.get('object') or 'Без категории').replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM products WHERE sku = '{sku}' LIMIT 1")
+            existing = cur.fetchone()
+            
+            if existing:
+                db_product_id = existing['id']
+                cur.execute(f"""
+                    UPDATE products
+                    SET name = '{name}', price = {price}, stock = {stock}, 
+                        category = '{category}', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {db_product_id}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO products (name, sku, price, stock, category)
+                    VALUES ('{name}', '{sku}', {price}, {stock}, '{category}')
+                    RETURNING id
+                """)
+                db_product_id = cur.fetchone()['id']
+            
+            cur.execute(f"""
+                SELECT id FROM marketplace_products 
+                WHERE product_id = {db_product_id} AND marketplace_id = {marketplace_id}
+            """)
+            
+            if cur.fetchone():
+                cur.execute(f"""
+                    UPDATE marketplace_products
+                    SET price = {price}, stock = {stock}, synced_at = CURRENT_TIMESTAMP
+                    WHERE product_id = {db_product_id} AND marketplace_id = {marketplace_id}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
+                    VALUES ({db_product_id}, {marketplace_id}, {price}, {stock}, CURRENT_TIMESTAMP)
+                """)
+            
+            synced += 1
+        
+        return synced
+    except Exception as e:
+        raise Exception(f'Wildberries sync failed: {str(e)}')
+
+
 def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
     """Полная синхронизация всех данных с маркетплейса"""
     if not marketplace_id:
@@ -87,7 +276,7 @@ def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute(f"""
-        SELECT m.id, m.name, m.slug, umi.api_key
+        SELECT m.id, m.name, m.slug, umi.api_key, umi.store_id, umi.api_secret
         FROM marketplaces m
         JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
         WHERE m.id = {mp_id} AND umi.user_id = 1
@@ -102,141 +291,102 @@ def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any
         return error_response(f'Marketplace ID {marketplace_id} not connected', 404)
     
     products_synced = 0
-    mock_products = [
-        {'name': f'Товар {i} - {mp["name"]}', 'sku': f'SKU-{mp["slug"]}-{i}', 
-         'price': 1500 + i * 100, 'cost_price': 800 + i * 50, 
-         'stock': 10 + i, 'category': 'Электроника'}
-        for i in range(1, 6)
-    ]
-    
-    for prod in mock_products:
-        sku_escaped = prod['sku'].replace("'", "''")
-        name_escaped = prod['name'].replace("'", "''")
-        category_escaped = prod['category'].replace("'", "''")
-        
-        cur.execute(f"SELECT id FROM products WHERE sku = '{sku_escaped}' LIMIT 1")
-        existing = cur.fetchone()
-        
-        if existing:
-            product_id = existing['id']
-            cur.execute(f"""
-                UPDATE products
-                SET name = '{name_escaped}', price = {prod['price']}, cost_price = {prod['cost_price']},
-                    stock = {prod['stock']}, category = '{category_escaped}', updated_at = CURRENT_TIMESTAMP
-                WHERE id = {product_id}
-            """)
-        else:
-            cur.execute(f"""
-                INSERT INTO products (name, sku, price, cost_price, stock, category)
-                VALUES ('{name_escaped}', '{sku_escaped}', {prod['price']}, {prod['cost_price']}, 
-                        {prod['stock']}, '{category_escaped}')
-                RETURNING id
-            """)
-            product_id = cur.fetchone()['id']
-        
-        cur.execute(f"""
-            SELECT id FROM marketplace_products 
-            WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
-        """)
-        mp_link = cur.fetchone()
-        
-        if mp_link:
-            cur.execute(f"""
-                UPDATE marketplace_products
-                SET price = {prod['price']}, stock = {prod['stock']}, synced_at = CURRENT_TIMESTAMP
-                WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
-            """)
-        else:
-            cur.execute(f"""
-                INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
-                VALUES ({product_id}, {mp['id']}, {prod['price']}, {prod['stock']}, CURRENT_TIMESTAMP)
-            """)
-        
-        products_synced += 1
-    
-    customers_synced = 0
-    mock_customers = [
-        {'name': f'Клиент {i} ({mp["name"]})', 'email': f'customer{i}@{mp["slug"]}.com', 
-         'phone': f'+7900000{i:04d}'}
-        for i in range(1, 4)
-    ]
-    
-    for cust in mock_customers:
-        name_escaped = cust['name'].replace("'", "''")
-        email_escaped = cust['email'].replace("'", "''")
-        phone_escaped = cust['phone'].replace("'", "''")
-        
-        cur.execute(f"SELECT id FROM customers WHERE email = '{email_escaped}' LIMIT 1")
-        existing = cur.fetchone()
-        
-        if not existing:
-            cur.execute(f"""
-                INSERT INTO customers (name, email, phone, status)
-                VALUES ('{name_escaped}', '{email_escaped}', '{phone_escaped}', 'active')
-                RETURNING id
-            """)
-            customers_synced += 1
-    
     orders_synced = 0
-    cur.execute("SELECT id FROM customers ORDER BY id DESC LIMIT 3")
-    customer_ids = [c['id'] for c in cur.fetchall()]
+    customers_synced = 0
     
-    cur.execute("SELECT id FROM products ORDER BY id DESC LIMIT 3")
-    product_ids = [p['id'] for p in cur.fetchall()]
+    marketplace_slug = mp['slug'].lower()
     
-    if customer_ids and product_ids:
-        mock_orders = [
-            {'order_number': f'ORD-{mp["slug"].upper()}-{1000+i}', 
-             'customer_id': customer_ids[i % len(customer_ids)],
-             'total_amount': 2500 + i * 300, 'items_count': 2,
-             'status': 'new', 'fulfillment_type': 'FBS'}
-            for i in range(1, 4)
-        ]
-        
-        for order in mock_orders:
-            order_number_escaped = order['order_number'].replace("'", "''")
-            fulfillment_escaped = order['fulfillment_type'].replace("'", "''")
-            status_escaped = order['status'].replace("'", "''")
+    try:
+        if marketplace_slug == 'ozon':
+            client_id = mp.get('store_id') or os.environ.get('OZON_CLIENT_ID')
+            api_key = mp.get('api_key') or os.environ.get('OZON_API_KEY')
             
-            cur.execute(f"SELECT id FROM orders WHERE order_number = '{order_number_escaped}' LIMIT 1")
-            existing = cur.fetchone()
+            if not client_id or not api_key:
+                raise Exception('Ozon API credentials not configured')
             
-            if not existing:
-                cur.execute(f"""
-                    INSERT INTO orders (order_number, customer_id, marketplace_id, status, 
-                                      fulfillment_type, total_amount, items_count)
-                    VALUES ('{order_number_escaped}', {order['customer_id']}, {mp['id']}, 
-                           '{status_escaped}', '{fulfillment_escaped}', 
-                           {order['total_amount']}, {order['items_count']})
-                    RETURNING id
-                """)
-                order_id = cur.fetchone()['id']
+            products_synced = sync_ozon_products(mp_id, client_id, api_key, conn, cur)
+            
+        elif marketplace_slug == 'wildberries':
+            api_key = mp.get('api_key') or os.environ.get('WILDBERRIES_API_KEY')
+            
+            if not api_key:
+                raise Exception('Wildberries API key not configured')
+            
+            products_synced = sync_wildberries_products(mp_id, api_key, conn, cur)
+            
+        else:
+            mock_products = [
+                {'name': f'Товар {i} - {mp["name"]}', 'sku': f'SKU-{mp["slug"]}-{i}', 
+                 'price': 1500 + i * 100, 'cost_price': 800 + i * 50, 
+                 'stock': 10 + i, 'category': 'Электроника'}
+                for i in range(1, 6)
+            ]
+            
+            for prod in mock_products:
+                sku_escaped = prod['sku'].replace("'", "''")
+                name_escaped = prod['name'].replace("'", "''")
+                category_escaped = prod['category'].replace("'", "''")
                 
-                for j in range(order['items_count']):
-                    product_id = product_ids[j % len(product_ids)]
+                cur.execute(f"SELECT id FROM products WHERE sku = '{sku_escaped}' LIMIT 1")
+                existing = cur.fetchone()
+                
+                if existing:
+                    product_id = existing['id']
                     cur.execute(f"""
-                        INSERT INTO order_items (order_id, product_id, quantity, price)
-                        VALUES ({order_id}, {product_id}, 1, 1500)
+                        UPDATE products
+                        SET name = '{name_escaped}', price = {prod['price']}, cost_price = {prod['cost_price']},
+                            stock = {prod['stock']}, category = '{category_escaped}', updated_at = CURRENT_TIMESTAMP
+                        WHERE id = {product_id}
+                    """)
+                else:
+                    cur.execute(f"""
+                        INSERT INTO products (name, sku, price, cost_price, stock, category)
+                        VALUES ('{name_escaped}', '{sku_escaped}', {prod['price']}, {prod['cost_price']}, 
+                                {prod['stock']}, '{category_escaped}')
+                        RETURNING id
+                    """)
+                    product_id = cur.fetchone()['id']
+                
+                cur.execute(f"""
+                    SELECT id FROM marketplace_products 
+                    WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
+                """)
+                
+                if cur.fetchone():
+                    cur.execute(f"""
+                        UPDATE marketplace_products
+                        SET price = {prod['price']}, stock = {prod['stock']}, synced_at = CURRENT_TIMESTAMP
+                        WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
+                    """)
+                else:
+                    cur.execute(f"""
+                        INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
+                        VALUES ({product_id}, {mp['id']}, {prod['price']}, {prod['stock']}, CURRENT_TIMESTAMP)
                     """)
                 
-                orders_synced += 1
-    
-    cur.execute(f"""
-        UPDATE user_marketplace_integrations
-        SET last_sync = CURRENT_TIMESTAMP
-        WHERE user_id = 1 AND marketplace_id = {mp['id']}
-    """)
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'products': products_synced,
-        'orders': orders_synced,
-        'customers': customers_synced,
-        'marketplace': mp['name'],
-        'message': f'Синхронизировано: товары ({products_synced}), заказы ({orders_synced}), клиенты ({customers_synced})'
-    })
+                products_synced += 1
+        
+        cur.execute(f"""
+            UPDATE user_marketplace_integrations
+            SET last_sync = CURRENT_TIMESTAMP
+            WHERE user_id = 1 AND marketplace_id = {mp['id']}
+        """)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'products': products_synced,
+            'orders': orders_synced,
+            'customers': customers_synced,
+            'marketplace': mp['name'],
+            'message': f'Синхронизировано: товары ({products_synced}), заказы ({orders_synced}), клиенты ({customers_synced})'
+        })
+        
+    except Exception as e:
+        cur.close()
+        conn.close()
+        raise Exception(f'Sync error: {str(e)}')
 
 
 def sync_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
