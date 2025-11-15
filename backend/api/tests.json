@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "name": "Get products",
+      "method": "GET",
+      "path": "/?path=products",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Get orders",
+      "method": "GET",
+      "path": "/?path=orders",
+      "expectedStatus": 200
+    }
+  ]
+}

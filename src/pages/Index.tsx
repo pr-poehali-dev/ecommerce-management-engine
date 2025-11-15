@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,45 +24,138 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { useToast } from '@/hooks/use-toast';
+
+const API_URL = 'https://functions.poehali.dev/26680cc3-0053-45ae-ac6a-1c7a3c94505c';
 
 interface Product {
   id: number;
   name: string;
+  description?: string;
   price: number;
   category: string;
   stock: number;
   image: string;
-  sales: number;
 }
 
 interface Order {
   id: string;
+  customerName?: string;
+  customerEmail?: string;
   date: string;
   status: 'delivered' | 'processing' | 'shipped';
   total: number;
   items: number;
+  address?: string;
+}
+
+interface Customer {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  avatar?: string;
+  totalSpent: number;
+  totalOrders: number;
+  status: string;
+  joinedDate: string;
+}
+
+interface ChartData {
+  date: string;
+  revenue: number;
+  orders: number;
+  customers: number;
 }
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [products, setProducts] = useState<Product[]>([
-    { id: 1, name: 'Беспроводные наушники', price: 8990, category: 'Электроника', stock: 45, image: '/placeholder.svg', sales: 156 },
-    { id: 2, name: 'Смарт-часы', price: 15990, category: 'Электроника', stock: 23, image: '/placeholder.svg', sales: 89 },
-    { id: 3, name: 'Рюкзак городской', price: 3490, category: 'Аксессуары', stock: 67, image: '/placeholder.svg', sales: 234 },
-    { id: 4, name: 'Термокружка', price: 1290, category: 'Дом', stock: 120, image: '/placeholder.svg', sales: 567 },
-  ]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [chartData, setChartData] = useState<ChartData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    revenue: 0,
+    orders: 0,
+    products: 0,
+    customers: 0,
+  });
+  const { toast } = useToast();
 
-  const [orders, setOrders] = useState<Order[]>([
-    { id: '#ORD-2024-001', date: '15.11.2024', status: 'delivered', total: 24990, items: 3 },
-    { id: '#ORD-2024-002', date: '14.11.2024', status: 'processing', total: 8990, items: 1 },
-    { id: '#ORD-2024-003', date: '13.11.2024', status: 'shipped', total: 45600, items: 5 },
-  ]);
+  const [newProduct, setNewProduct] = useState({
+    name: '',
+    description: '',
+    price: '',
+    category: '',
+    stock: '',
+  });
 
-  const stats = {
-    revenue: 1234567,
-    orders: 342,
-    products: products.length,
-    customers: 1856,
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [productsRes, ordersRes, customersRes, analyticsRes] = await Promise.all([
+        fetch(`${API_URL}?path=products`),
+        fetch(`${API_URL}?path=orders`),
+        fetch(`${API_URL}?path=customers`),
+        fetch(`${API_URL}?path=analytics`),
+      ]);
+
+      const productsData = await productsRes.json();
+      const ordersData = await ordersRes.json();
+      const customersData = await customersRes.json();
+      const analyticsData = await analyticsRes.json();
+
+      setProducts(productsData.products || []);
+      setOrders(ordersData.orders || []);
+      setCustomers(customersData.customers || []);
+      setStats(analyticsData.stats || stats);
+      setChartData(analyticsData.chartData || []);
+    } catch (error) {
+      toast({
+        title: 'Ошибка загрузки данных',
+        description: 'Не удалось загрузить данные с сервера',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddProduct = async () => {
+    try {
+      const response = await fetch(`${API_URL}?path=products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newProduct.name,
+          description: newProduct.description,
+          price: parseFloat(newProduct.price),
+          category: newProduct.category,
+          stock: parseInt(newProduct.stock),
+        }),
+      });
+
+      if (response.ok) {
+        toast({
+          title: 'Товар добавлен',
+          description: 'Товар успешно добавлен в каталог',
+        });
+        setNewProduct({ name: '', description: '', price: '', category: '', stock: '' });
+        loadData();
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось добавить товар',
+        variant: 'destructive',
+      });
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -103,6 +195,8 @@ const Index = () => {
               {[
                 { id: 'dashboard', icon: 'LayoutDashboard', label: 'Дашборд' },
                 { id: 'products', icon: 'Package', label: 'Товары' },
+                { id: 'orders', icon: 'ShoppingCart', label: 'Заказы' },
+                { id: 'customers', icon: 'Users', label: 'Клиенты' },
                 { id: 'profile', icon: 'User', label: 'Профиль' },
               ].map((item) => (
                 <button
@@ -159,52 +253,80 @@ const Index = () => {
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
                         <Icon name="TrendingUp" size={20} />
-                        Топ товары по продажам
+                        Аналитика продаж
                       </CardTitle>
+                      <CardDescription>Динамика выручки за неделю</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
-                        {products.sort((a, b) => b.sales - a.sales).slice(0, 4).map((product) => (
-                          <div key={product.id} className="flex items-center gap-4">
-                            <img src={product.image} alt={product.name} className="w-12 h-12 rounded-lg object-cover" />
-                            <div className="flex-1">
-                              <p className="font-medium">{product.name}</p>
-                              <p className="text-sm text-muted-foreground">{product.sales} продаж</p>
-                            </div>
-                            <Badge variant="secondary">{product.price} ₽</Badge>
-                          </div>
-                        ))}
-                      </div>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <LineChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
+                          <YAxis stroke="#6b7280" fontSize={12} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                          />
+                          <Line type="monotone" dataKey="revenue" stroke="#6E59A5" strokeWidth={3} dot={{ fill: '#6E59A5' }} />
+                        </LineChart>
+                      </ResponsiveContainer>
                     </CardContent>
                   </Card>
 
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Icon name="Clock" size={20} />
-                        Последние заказы
+                        <Icon name="BarChart3" size={20} />
+                        Заказы и клиенты
                       </CardTitle>
+                      <CardDescription>Новые заказы и клиенты</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
-                        {orders.map((order) => (
-                          <div key={order.id} className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium">{order.id}</p>
-                              <p className="text-sm text-muted-foreground">{order.date}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-semibold">{order.total} ₽</p>
-                              <Badge variant="outline" className={getStatusColor(order.status)}>
-                                {getStatusText(order.status)}
-                              </Badge>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
+                          <YAxis stroke="#6b7280" fontSize={12} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                          />
+                          <Legend />
+                          <Bar dataKey="orders" fill="#0EA5E9" radius={[8, 8, 0, 0]} name="Заказы" />
+                          <Bar dataKey="customers" fill="#6E59A5" radius={[8, 8, 0, 0]} name="Клиенты" />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </CardContent>
                   </Card>
                 </div>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Icon name="Clock" size={20} />
+                      Последние заказы
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {orders.slice(0, 5).map((order) => (
+                        <div key={order.id} className="flex items-center justify-between border-b pb-4 last:border-0">
+                          <div>
+                            <p className="font-medium">{order.id}</p>
+                            <p className="text-sm text-muted-foreground">{order.customerName || 'Клиент'} • {order.date}</p>
+                          </div>
+                          <div className="text-right flex items-center gap-3">
+                            <div>
+                              <p className="font-semibold">{order.total} ₽</p>
+                              <p className="text-sm text-muted-foreground">{order.items} товара</p>
+                            </div>
+                            <Badge variant="outline" className={getStatusColor(order.status)}>
+                              {getStatusText(order.status)}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
 
@@ -230,27 +352,55 @@ const Index = () => {
                       <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                           <Label htmlFor="name">Название</Label>
-                          <Input id="name" placeholder="Введите название товара" />
+                          <Input 
+                            id="name" 
+                            placeholder="Введите название товара" 
+                            value={newProduct.name}
+                            onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
+                          />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="grid gap-2">
                             <Label htmlFor="price">Цена (₽)</Label>
-                            <Input id="price" type="number" placeholder="0" />
+                            <Input 
+                              id="price" 
+                              type="number" 
+                              placeholder="0" 
+                              value={newProduct.price}
+                              onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
+                            />
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="stock">Количество</Label>
-                            <Input id="stock" type="number" placeholder="0" />
+                            <Input 
+                              id="stock" 
+                              type="number" 
+                              placeholder="0" 
+                              value={newProduct.stock}
+                              onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
+                            />
                           </div>
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="category">Категория</Label>
-                          <Input id="category" placeholder="Электроника, Одежда..." />
+                          <Input 
+                            id="category" 
+                            placeholder="Электроника, Одежда..." 
+                            value={newProduct.category}
+                            onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
+                          />
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="description">Описание</Label>
-                          <Textarea id="description" placeholder="Описание товара" rows={4} />
+                          <Textarea 
+                            id="description" 
+                            placeholder="Описание товара" 
+                            rows={4}
+                            value={newProduct.description}
+                            onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
+                          />
                         </div>
-                        <Button>Создать товар</Button>
+                        <Button onClick={handleAddProduct}>Создать товар</Button>
                       </div>
                     </DialogContent>
                   </Dialog>
@@ -265,7 +415,6 @@ const Index = () => {
                           <TableHead>Категория</TableHead>
                           <TableHead>Цена</TableHead>
                           <TableHead>Остаток</TableHead>
-                          <TableHead>Продажи</TableHead>
                           <TableHead className="text-right">Действия</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -275,7 +424,12 @@ const Index = () => {
                             <TableCell>
                               <div className="flex items-center gap-3">
                                 <img src={product.image} alt={product.name} className="w-10 h-10 rounded-lg object-cover" />
-                                <span className="font-medium">{product.name}</span>
+                                <div>
+                                  <p className="font-medium">{product.name}</p>
+                                  {product.description && (
+                                    <p className="text-xs text-muted-foreground">{product.description.substring(0, 50)}...</p>
+                                  )}
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell>{product.category}</TableCell>
@@ -285,7 +439,6 @@ const Index = () => {
                                 {product.stock} шт
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-muted-foreground">{product.sales}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
                                 <Button variant="ghost" size="icon">
@@ -302,6 +455,104 @@ const Index = () => {
                     </Table>
                   </CardContent>
                 </Card>
+              </div>
+            )}
+
+            {activeTab === 'orders' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-3xl font-bold mb-2">Управление заказами</h2>
+                  <p className="text-muted-foreground">Отслеживайте статусы и обрабатывайте заказы</p>
+                </div>
+
+                <Card>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Номер заказа</TableHead>
+                          <TableHead>Клиент</TableHead>
+                          <TableHead>Дата</TableHead>
+                          <TableHead>Статус</TableHead>
+                          <TableHead>Сумма</TableHead>
+                          <TableHead className="text-right">Действия</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {orders.map((order) => (
+                          <TableRow key={order.id}>
+                            <TableCell className="font-medium">{order.id}</TableCell>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{order.customerName || 'Клиент'}</p>
+                                <p className="text-xs text-muted-foreground">{order.customerEmail || ''}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>{order.date}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={getStatusColor(order.status)}>
+                                {getStatusText(order.status)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-semibold">{order.total} ₽</TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" className="gap-2">
+                                Детали
+                                <Icon name="ChevronRight" size={16} />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {activeTab === 'customers' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-3xl font-bold mb-2">CRM - Управление клиентами</h2>
+                  <p className="text-muted-foreground">База клиентов и история их покупок</p>
+                </div>
+
+                <div className="grid gap-4">
+                  {customers.map((customer) => (
+                    <Card key={customer.id} className="hover-scale">
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-4">
+                            <Avatar className="w-16 h-16">
+                              <AvatarImage src={customer.avatar || '/placeholder.svg'} />
+                              <AvatarFallback className="bg-primary text-primary-foreground text-lg">
+                                {customer.name.split(' ').map(n => n[0]).join('')}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className="text-xl font-bold">{customer.name}</h3>
+                                <Badge variant={customer.status === 'premium' ? 'default' : 'secondary'} className="gap-1">
+                                  {customer.status === 'premium' && <Icon name="Star" size={12} />}
+                                  {customer.status === 'premium' ? 'Премиум' : 'Активный'}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-2">{customer.email}</p>
+                              {customer.phone && (
+                                <p className="text-sm text-muted-foreground">{customer.phone}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-bold text-green-600">{customer.totalSpent.toLocaleString()} ₽</p>
+                            <p className="text-sm text-muted-foreground">{customer.totalOrders} заказов</p>
+                            <p className="text-xs text-muted-foreground mt-1">С {customer.joinedDate}</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -359,7 +610,7 @@ const Index = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        {orders.map((order) => (
+                        {orders.slice(0, 3).map((order) => (
                           <div key={order.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                             <div className="flex items-start justify-between mb-3">
                               <div>
