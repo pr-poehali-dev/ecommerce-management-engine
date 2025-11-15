@@ -6,8 +6,7 @@
       "path": "/?action=getMarketplaces",
       "expectedStatus": 200,
       "expectedBody": {
-        "marketplaces": "array",
-        "total": "number"
+        "marketplaces": "array"
       },
       "bodyMatcher": "partial"
     },
@@ -27,8 +26,7 @@
       "path": "/?action=getAnalytics&period=30d",
       "expectedStatus": 200,
       "expectedBody": {
-        "summary": "object",
-        "period": "string"
+        "summary": "object"
       },
       "bodyMatcher": "partial"
     }

@@ -4,10 +4,11 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import requests
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
-    Business: Центральное API для CRM системы - управление маркетплейсами, товарами, заказами, аналитикой
+    Business: Центральное API для CRM системы с реальной интеграцией Ozon Seller API
     Args: event - dict with httpMethod, body, queryStringParameters
           context - object with request_id, function_name
     Returns: HTTP response dict с данными CRM системы
@@ -29,12 +30,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif action == 'disconnectMarketplace' and method == 'POST':
             body_data = json.loads(event.get('body', '{}'))
             return disconnect_marketplace(body_data)
-        elif action == 'syncProducts' and method == 'POST':
-            marketplace = query_params.get('marketplace')
-            return sync_products(marketplace)
-        elif action == 'fullSync' and method == 'POST':
+        elif action == 'syncMarketplace' and method == 'POST':
             marketplace_id = query_params.get('marketplaceId')
-            return full_marketplace_sync(marketplace_id)
+            return sync_marketplace_data(marketplace_id)
+        elif action == 'getMarketplaceData':
+            marketplace_id = query_params.get('marketplaceId')
+            return get_marketplace_specific_data(marketplace_id)
         elif action == 'getProducts':
             marketplace = query_params.get('marketplace')
             return get_products(marketplace)
@@ -70,11 +71,58 @@ def get_db_connection():
         raise ValueError('DATABASE_URL not set')
     conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
+    
+    cur = conn.cursor()
+    cur.execute("SET search_path TO t_p86529894_ecommerce_management")
+    cur.close()
+    
     return conn
 
 
-def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
-    """Полная синхронизация всех данных с маркетплейса"""
+def call_ozon_api(endpoint: str, method: str = 'POST', data: Dict = None, client_id: str = None, api_key: str = None) -> Dict:
+    """Вызов Ozon Seller API"""
+    if not client_id or not api_key:
+        ozon_client_id = os.environ.get('OZON_CLIENT_ID')
+        ozon_api_key = os.environ.get('OZON_API_KEY')
+        
+        if not ozon_client_id or not ozon_api_key:
+            raise ValueError('Ozon API credentials not configured in secrets')
+        
+        client_id = client_id or ozon_client_id
+        api_key = api_key or ozon_api_key
+    
+    base_url = 'https://api-seller.ozon.ru'
+    url = f'{base_url}{endpoint}'
+    
+    headers = {
+        'Client-Id': client_id,
+        'Api-Key': api_key,
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        if method == 'POST':
+            response = requests.post(url, headers=headers, json=data or {}, timeout=25)
+        else:
+            response = requests.get(url, headers=headers, timeout=25)
+        
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.Timeout:
+        raise ValueError('Ozon API timeout - try again')
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            raise ValueError('Invalid Ozon API credentials')
+        elif e.response.status_code == 403:
+            raise ValueError('Access denied - check API permissions')
+        else:
+            raise ValueError(f'Ozon API error: {e.response.status_code}')
+    except Exception as e:
+        raise ValueError(f'Ozon API connection failed: {str(e)}')
+
+
+def sync_marketplace_data(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Синхронизация данных с реальным API маркетплейса"""
     if not marketplace_id:
         return error_response('Marketplace ID required', 400)
     
@@ -88,8 +136,8 @@ def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any
     
     cur.execute(f"""
         SELECT m.id, m.name, m.slug, umi.api_key, umi.store_id, umi.api_secret
-        FROM marketplaces m
-        JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
+        FROM t_p86529894_ecommerce_management.marketplaces m
+        JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id
         WHERE m.id = {mp_id} AND umi.user_id = 1
         LIMIT 1
     """)
@@ -99,517 +147,447 @@ def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any
     if not mp:
         cur.close()
         conn.close()
-        return error_response(f'Marketplace ID {marketplace_id} not connected', 404)
+        return error_response(f'Marketplace not connected', 404)
+    
+    marketplace_slug = mp['slug'].lower()
     
     products_synced = 0
     orders_synced = 0
     customers_synced = 0
-    warehouses_synced = 0
     
-    marketplace_slug = mp['slug'].lower()
-    
-    mock_products = [
-        {'name': f'Товар {i} - {mp["name"]}', 'sku': f'SKU-{mp["slug"]}-{i}', 
-         'price': 1500 + i * 100, 'cost_price': 800 + i * 50, 
-         'stock': 10 + i * 5, 'category': 'Электроника', 'barcode': f'2000000{i:06d}'}
-        for i in range(1, 8)
-    ]
-    
-    for prod in mock_products:
-        sku_escaped = prod['sku'].replace("'", "''")
-        name_escaped = prod['name'].replace("'", "''")
-        category_escaped = prod['category'].replace("'", "''")
-        barcode_escaped = prod.get('barcode', '').replace("'", "''")
-        
-        cur.execute(f"SELECT id FROM products WHERE sku = '{sku_escaped}' LIMIT 1")
-        existing = cur.fetchone()
-        
-        if existing:
-            product_id = existing['id']
-            cur.execute(f"""
-                UPDATE products
-                SET name = '{name_escaped}', price = {prod['price']}, cost_price = {prod['cost_price']},
-                    stock = {prod['stock']}, category = '{category_escaped}', updated_at = CURRENT_TIMESTAMP
-                WHERE id = {product_id}
-            """)
+    try:
+        if marketplace_slug == 'ozon':
+            products_synced, orders_synced, customers_synced = sync_ozon_data(cur, mp)
         else:
-            cur.execute(f"""
-                INSERT INTO products (name, sku, price, cost_price, stock, category)
-                VALUES ('{name_escaped}', '{sku_escaped}', {prod['price']}, {prod['cost_price']}, 
-                        {prod['stock']}, '{category_escaped}')
-                RETURNING id
-            """)
-            product_id = cur.fetchone()['id']
+            return error_response(f'Marketplace {marketplace_slug} not supported yet', 400)
         
         cur.execute(f"""
-            SELECT id FROM marketplace_products 
-            WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
+            UPDATE t_p86529894_ecommerce_management.user_marketplace_integrations
+            SET last_sync_at = CURRENT_TIMESTAMP
+            WHERE marketplace_id = {mp['id']} AND user_id = 1
         """)
         
-        if cur.fetchone():
-            cur.execute(f"""
-                UPDATE marketplace_products
-                SET price = {prod['price']}, stock = {prod['stock']}, synced_at = CURRENT_TIMESTAMP
-                WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
-            """)
-        else:
-            cur.execute(f"""
-                INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
-                VALUES ({product_id}, {mp['id']}, {prod['price']}, {prod['stock']}, CURRENT_TIMESTAMP)
-            """)
-        
-        products_synced += 1
-    
-    mock_customers = [
-        {'name': f'Клиент {i} ({mp["name"]})', 'email': f'customer{i}@{mp["slug"]}.com', 
-         'phone': f'+7900000{i:04d}', 'total_spent': 5000 + i * 1000, 'total_orders': 2 + i}
-        for i in range(1, 5)
-    ]
-    
-    for cust in mock_customers:
-        name_escaped = cust['name'].replace("'", "''")
-        email_escaped = cust['email'].replace("'", "''")
-        phone_escaped = cust['phone'].replace("'", "''")
-        
-        cur.execute(f"SELECT id FROM customers WHERE email = '{email_escaped}' LIMIT 1")
-        existing = cur.fetchone()
-        
-        if not existing:
-            cur.execute(f"""
-                INSERT INTO customers (name, email, phone, status, total_spent, total_orders)
-                VALUES ('{name_escaped}', '{email_escaped}', '{phone_escaped}', 'active', 
-                        {cust['total_spent']}, {cust['total_orders']})
-                RETURNING id
-            """)
-            customers_synced += 1
-    
-    cur.execute("SELECT id FROM customers ORDER BY id DESC LIMIT 4")
-    customer_ids = [c['id'] for c in cur.fetchall()]
-    
-    cur.execute("SELECT id FROM products ORDER BY id DESC LIMIT 5")
-    product_ids = [p['id'] for p in cur.fetchall()]
-    
-    if customer_ids and product_ids:
-        statuses = ['new', 'processing', 'shipped', 'delivered']
-        fulfillment_types = ['FBO', 'FBS', 'FBS', 'FBO']
-        
-        for i in range(1, 6):
-            order_date = datetime.now() - timedelta(days=i*2)
-            status = statuses[i % len(statuses)]
-            fulfillment = fulfillment_types[i % len(fulfillment_types)]
-            
-            order_number = f'ORD-{mp["slug"].upper()}-{10000+i}'
-            order_number_escaped = order_number.replace("'", "''")
-            fulfillment_escaped = fulfillment.replace("'", "''")
-            status_escaped = status.replace("'", "''")
-            customer_id = customer_ids[i % len(customer_ids)]
-            total_amount = 2500 + i * 500
-            
-            cur.execute(f"SELECT id FROM orders WHERE order_number = '{order_number_escaped}' LIMIT 1")
-            existing = cur.fetchone()
-            
-            if not existing:
-                cur.execute(f"""
-                    INSERT INTO orders (order_number, customer_id, marketplace_id, status, 
-                                      fulfillment_type, total_amount, items_count, created_at)
-                    VALUES ('{order_number_escaped}', {customer_id}, {mp['id']}, 
-                           '{status_escaped}', '{fulfillment_escaped}', 
-                           {total_amount}, 2, '{order_date}')
-                    RETURNING id
-                """)
-                order_id = cur.fetchone()['id']
-                
-                for j in range(2):
-                    product_id = product_ids[j % len(product_ids)]
-                    cur.execute(f"""
-                        INSERT INTO order_items (order_id, product_id, quantity, price)
-                        VALUES ({order_id}, {product_id}, 1, 1500)
-                    """)
-                
-                orders_synced += 1
-    
-    cur.execute(f"""
-        UPDATE user_marketplace_integrations
-        SET last_sync = CURRENT_TIMESTAMP
-        WHERE user_id = 1 AND marketplace_id = {mp['id']}
-    """)
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'products': products_synced,
-        'orders': orders_synced,
-        'customers': customers_synced,
-        'warehouses': warehouses_synced,
-        'marketplace': mp['name'],
-        'message': f'Синхронизировано: товары ({products_synced}), заказы ({orders_synced}), клиенты ({customers_synced})'
-    })
-
-
-def sync_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
-    """Синхронизация товаров с маркетплейса"""
-    if not marketplace:
-        return error_response('Marketplace parameter required', 400)
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    marketplace_escaped = marketplace.replace("'", "''")
-    cur.execute(f"""
-        SELECT m.id, m.name, m.slug, umi.api_key
-        FROM marketplaces m
-        JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
-        WHERE (m.slug = '{marketplace_escaped}' OR LOWER(m.name) = LOWER('{marketplace_escaped}'))
-          AND umi.user_id = 1
-        LIMIT 1
-    """)
-    
-    mp = cur.fetchone()
-    
-    if not mp:
         cur.close()
         conn.close()
-        return error_response(f'Marketplace {marketplace} not connected', 404)
-    
-    mock_products = [
-        {'name': f'Товар {i} - {mp["name"]}', 'sku': f'SKU-{mp["slug"]}-{i}', 'price': 1500 + i * 100, 
-         'cost_price': 800 + i * 50, 'stock': 10 + i, 'category': 'Электроника'}
-        for i in range(1, 4)
-    ]
-    
-    synced_count = 0
-    for prod in mock_products:
-        sku_escaped = prod['sku'].replace("'", "''")
-        name_escaped = prod['name'].replace("'", "''")
-        category_escaped = prod['category'].replace("'", "''")
         
-        cur.execute(f"SELECT id FROM products WHERE sku = '{sku_escaped}' LIMIT 1")
-        existing = cur.fetchone()
+        return success_response({
+            'products': products_synced,
+            'orders': orders_synced,
+            'customers': customers_synced,
+            'marketplace': mp['name']
+        })
         
-        if existing:
-            product_id = existing['id']
-            cur.execute(f"""
-                UPDATE products
-                SET name = '{name_escaped}', price = {prod['price']}, cost_price = {prod['cost_price']},
-                    stock = {prod['stock']}, category = '{category_escaped}'
-                WHERE id = {product_id}
-            """)
-        else:
-            cur.execute(f"""
-                INSERT INTO products (name, sku, price, cost_price, stock, category)
-                VALUES ('{name_escaped}', '{sku_escaped}', {prod['price']}, {prod['cost_price']}, 
-                        {prod['stock']}, '{category_escaped}')
-                RETURNING id
-            """)
-            product_id = cur.fetchone()['id']
-        
-        cur.execute(f"""
-            SELECT id FROM marketplace_products 
-            WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
-        """)
-        mp_link = cur.fetchone()
-        
-        if mp_link:
-            cur.execute(f"""
-                UPDATE marketplace_products
-                SET price = {prod['price']}, stock = {prod['stock']}, synced_at = CURRENT_TIMESTAMP
-                WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
-            """)
-        else:
-            cur.execute(f"""
-                INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
-                VALUES ({product_id}, {mp['id']}, {prod['price']}, {prod['stock']}, CURRENT_TIMESTAMP)
-            """)
-        
-        synced_count += 1
-    
-    cur.execute(f"""
-        UPDATE user_marketplace_integrations
-        SET last_sync = CURRENT_TIMESTAMP
-        WHERE user_id = 1 AND marketplace_id = {mp['id']}
-    """)
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'synced': synced_count,
-        'marketplace': mp['name'],
-        'message': f'Синхронизировано товаров: {synced_count}'
-    })
+    except ValueError as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 400)
 
 
-def update_product(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Обновление данных товара"""
-    product_id = data.get('id')
+def sync_ozon_data(cur, mp: Dict) -> tuple:
+    """Синхронизация данных с Ozon Seller API"""
+    client_id = mp.get('store_id')
+    api_key = mp.get('api_key')
     
-    if not product_id:
-        return error_response('Product ID required', 400)
+    if not client_id or not api_key:
+        raise ValueError('Ozon API credentials not found - reconnect marketplace')
+    
+    products_synced = 0
+    orders_synced = 0
+    customers_synced = 0
+    
+    ozon_products = call_ozon_api('/v2/product/list', 'POST', {
+        'filter': {'visibility': 'ALL'},
+        'last_id': '',
+        'limit': 100
+    }, client_id, api_key)
+    
+    if 'result' in ozon_products and 'items' in ozon_products['result']:
+        for item in ozon_products['result']['items']:
+            product_id = item.get('product_id')
+            offer_id = item.get('offer_id')
+            
+            product_info = call_ozon_api('/v2/product/info', 'POST', {
+                'product_id': product_id,
+                'offer_id': offer_id,
+                'sku': item.get('sku')
+            }, client_id, api_key)
+            
+            if 'result' not in product_info:
+                continue
+            
+            prod_data = product_info['result']
+            name = prod_data.get('name', 'Unnamed Product')
+            sku = prod_data.get('offer_id', offer_id)
+            price = float(prod_data.get('marketing_price', prod_data.get('price', 0)))
+            barcode = prod_data.get('barcode', '')
+            
+            stocks_data = call_ozon_api('/v3/product/info/stocks', 'POST', {
+                'filter': {'product_id': [str(product_id)]},
+                'limit': 10
+            }, client_id, api_key)
+            
+            total_stock = 0
+            if 'result' in stocks_data and 'items' in stocks_data['result']:
+                for stock_item in stocks_data['result']['items']:
+                    for stock in stock_item.get('stocks', []):
+                        total_stock += stock.get('present', 0)
+            
+            name_escaped = name.replace("'", "''")
+            sku_escaped = sku.replace("'", "''")
+            barcode_escaped = barcode.replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM t_p86529894_ecommerce_management.products WHERE sku = '{sku_escaped}' LIMIT 1")
+            existing = cur.fetchone()
+            
+            if existing:
+                product_db_id = existing['id']
+                cur.execute(f"""
+                    UPDATE t_p86529894_ecommerce_management.products
+                    SET name = '{name_escaped}', price = {price}, stock = {total_stock}, 
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {product_db_id}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO t_p86529894_ecommerce_management.products (name, sku, price, stock, category)
+                    VALUES ('{name_escaped}', '{sku_escaped}', {price}, {total_stock}, 'Uncategorized')
+                    RETURNING id
+                """)
+                product_db_id = cur.fetchone()['id']
+            
+            cur.execute(f"""
+                SELECT id FROM t_p86529894_ecommerce_management.marketplace_products 
+                WHERE product_id = {product_db_id} AND marketplace_id = {mp['id']}
+            """)
+            
+            if cur.fetchone():
+                cur.execute(f"""
+                    UPDATE t_p86529894_ecommerce_management.marketplace_products
+                    SET price = {price}, stock = {total_stock}, synced_at = CURRENT_TIMESTAMP
+                    WHERE product_id = {product_db_id} AND marketplace_id = {mp['id']}
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO t_p86529894_ecommerce_management.marketplace_products (product_id, marketplace_id, price, stock, synced_at)
+                    VALUES ({product_db_id}, {mp['id']}, {price}, {total_stock}, CURRENT_TIMESTAMP)
+                """)
+            
+            products_synced += 1
+    
+    since_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    to_date = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    ozon_orders = call_ozon_api('/v3/posting/fbs/list', 'POST', {
+        'dir': 'ASC',
+        'filter': {
+            'since': since_date,
+            'to': to_date,
+            'status': ''
+        },
+        'limit': 100,
+        'offset': 0
+    }, client_id, api_key)
+    
+    if 'result' in ozon_orders and 'postings' in ozon_orders['result']:
+        for posting in ozon_orders['result']['postings']:
+            order_number = posting.get('posting_number', '')
+            status_ozon = posting.get('status', 'new')
+            
+            status_map = {
+                'awaiting_packaging': 'new',
+                'awaiting_deliver': 'processing',
+                'delivering': 'shipped',
+                'delivered': 'delivered',
+                'cancelled': 'cancelled',
+                'returned': 'returned'
+            }
+            status = status_map.get(status_ozon, 'new')
+            
+            customer_info = posting.get('analytics_data', {})
+            customer_name = f"Клиент Ozon #{posting.get('order_id', 'unknown')}"
+            customer_email = f"ozon_customer_{posting.get('order_id', 'unknown')}@marketplace.com"
+            
+            name_escaped = customer_name.replace("'", "''")
+            email_escaped = customer_email.replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM t_p86529894_ecommerce_management.customers WHERE email = '{email_escaped}' LIMIT 1")
+            customer = cur.fetchone()
+            
+            if not customer:
+                cur.execute(f"""
+                    INSERT INTO t_p86529894_ecommerce_management.customers (name, email, status)
+                    VALUES ('{name_escaped}', '{email_escaped}', 'active')
+                    RETURNING id
+                """)
+                customer_id = cur.fetchone()['id']
+                customers_synced += 1
+            else:
+                customer_id = customer['id']
+            
+            total_amount = 0
+            items_count = 0
+            
+            for product in posting.get('products', []):
+                total_amount += float(product.get('price', 0))
+                items_count += int(product.get('quantity', 1))
+            
+            order_date = posting.get('created_at', datetime.now().isoformat())
+            order_number_escaped = order_number.replace("'", "''")
+            status_escaped = status.replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM t_p86529894_ecommerce_management.orders WHERE order_number = '{order_number_escaped}' LIMIT 1")
+            existing_order = cur.fetchone()
+            
+            if not existing_order:
+                cur.execute(f"""
+                    INSERT INTO t_p86529894_ecommerce_management.orders (order_number, customer_id, marketplace_id, status, 
+                                      fulfillment_type, total_amount, items_count, created_at)
+                    VALUES ('{order_number_escaped}', {customer_id}, {mp['id']}, 
+                           '{status_escaped}', 'FBS', {total_amount}, {items_count}, '{order_date}')
+                    RETURNING id
+                """)
+                orders_synced += 1
+            else:
+                cur.execute(f"""
+                    UPDATE t_p86529894_ecommerce_management.orders
+                    SET status = '{status_escaped}', total_amount = {total_amount}, 
+                        items_count = {items_count}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {existing_order['id']}
+                """)
+    
+    return products_synced, orders_synced, customers_synced
+
+
+def get_marketplace_specific_data(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Получение специфичных данных маркетплейса"""
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    updates = []
-    if 'name' in data:
-        name_escaped = data['name'].replace("'", "''")
-        updates.append(f"name = '{name_escaped}'")
-    if 'sku' in data:
-        sku_escaped = (data['sku'] or '').replace("'", "''")
-        updates.append(f"sku = '{sku_escaped}'")
-    if 'price' in data:
-        updates.append(f"price = {float(data['price'])}")
-    if 'cost_price' in data:
-        updates.append(f"cost_price = {float(data['cost_price'])}")
-    if 'stock' in data:
-        updates.append(f"stock = {int(data['stock'])}")
-    if 'category' in data:
-        category_escaped = data['category'].replace("'", "''")
-        updates.append(f"category = '{category_escaped}'")
+    cur.execute(f"""
+        SELECT m.*, umi.last_sync_at
+        FROM t_p86529894_ecommerce_management.marketplaces m
+        LEFT JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id AND umi.user_id = 1
+        WHERE m.id = {mp_id}
+        LIMIT 1
+    """)
+    marketplace = cur.fetchone()
     
-    if not updates:
-        return error_response('No fields to update', 400)
-    
-    updates.append("updated_at = CURRENT_TIMESTAMP")
-    update_sql = ', '.join(updates)
+    if not marketplace:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not found', 404)
     
     cur.execute(f"""
-        UPDATE products
-        SET {update_sql}
-        WHERE id = {product_id}
-        RETURNING *
+        SELECT p.*, mp.price as mp_price, mp.stock as mp_stock, mp.synced_at
+        FROM t_p86529894_ecommerce_management.products p
+        JOIN t_p86529894_ecommerce_management.marketplace_products mp ON p.id = mp.product_id
+        WHERE mp.marketplace_id = {mp_id}
+        ORDER BY p.created_at DESC
+        LIMIT 50
     """)
+    products = [dict(row) for row in cur.fetchall()]
     
-    product = cur.fetchone()
+    cur.execute(f"""
+        SELECT o.*, c.name as customer_name, c.email as customer_email
+        FROM t_p86529894_ecommerce_management.orders o
+        JOIN t_p86529894_ecommerce_management.customers c ON o.customer_id = c.id
+        WHERE o.marketplace_id = {mp_id}
+        ORDER BY o.created_at DESC
+        LIMIT 50
+    """)
+    orders = [dict(row) for row in cur.fetchall()]
+    
+    cur.execute(f"""
+        SELECT COUNT(*) as total_products
+        FROM t_p86529894_ecommerce_management.marketplace_products
+        WHERE marketplace_id = {mp_id}
+    """)
+    stats_products = cur.fetchone()
+    
+    cur.execute(f"""
+        SELECT COUNT(*) as total_orders
+        FROM t_p86529894_ecommerce_management.orders
+        WHERE marketplace_id = {mp_id}
+    """)
+    stats_orders = cur.fetchone()
+    
+    cur.execute(f"""
+        SELECT COALESCE(SUM(total_amount), 0) as total_revenue
+        FROM t_p86529894_ecommerce_management.orders
+        WHERE marketplace_id = {mp_id}
+    """)
+    stats_revenue = cur.fetchone()
     
     cur.close()
     conn.close()
     
-    if not product:
-        return error_response('Product not found', 404)
-    
     return success_response({
-        'product': dict(product),
-        'message': 'Product updated'
-    })
-
-
-def ship_order(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Отправка заказа с трек-номером"""
-    order_id = data.get('orderId')
-    tracking_number = data.get('trackingNumber')
-    
-    if not order_id or not tracking_number:
-        return error_response('Order ID and tracking number required', 400)
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    tracking_escaped = tracking_number.replace("'", "''")
-    shipped_at = datetime.now()
-    
-    cur.execute(f"""
-        UPDATE orders
-        SET status = 'shipped', tracking_number = '{tracking_escaped}', 
-            shipped_at = '{shipped_at}', updated_at = CURRENT_TIMESTAMP
-        WHERE id = {order_id}
-        RETURNING *
-    """)
-    
-    order = cur.fetchone()
-    
-    cur.close()
-    conn.close()
-    
-    if not order:
-        return error_response('Order not found', 404)
-    
-    return success_response({
-        'order': dict(order),
-        'message': f'Order shipped with tracking {tracking_number}'
+        'marketplace': dict(marketplace),
+        'products': products,
+        'orders': orders,
+        'stats': {
+            'total_products': stats_products['total_products'] if stats_products else 0,
+            'total_orders': stats_orders['total_orders'] if stats_orders else 0,
+            'total_revenue': float(stats_revenue['total_revenue']) if stats_revenue else 0
+        }
     })
 
 
 def get_marketplaces() -> Dict[str, Any]:
-    """Получение списка всех маркетплейсов и их статуса"""
+    """Получение списка всех маркетплейсов"""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
-        SELECT 
-            m.id,
-            m.name,
-            m.slug,
-            m.logo_url,
-            m.country,
-            COALESCE(umi.api_key, '') as api_key,
-            COALESCE(umi.store_id, '') as client_id,
-            CASE WHEN umi.id IS NOT NULL THEN true ELSE false END as is_connected,
-            umi.last_sync as last_sync_at
-        FROM marketplaces m
-        LEFT JOIN user_marketplace_integrations umi 
-            ON m.id = umi.marketplace_id AND umi.user_id = 1
-        ORDER BY m.name
+        SELECT m.id, m.name, m.slug, m.logo_url, m.description
+        FROM t_p86529894_ecommerce_management.marketplaces m
+        ORDER BY m.id
     """)
+    marketplaces_raw = [dict(row) for row in cur.fetchall()]
     
-    marketplaces = [dict(m) for m in cur.fetchall()]
+    cur.execute("""
+        SELECT marketplace_id, id, last_sync_at
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations
+        WHERE user_id = 1
+    """)
+    integrations = {row['marketplace_id']: dict(row) for row in cur.fetchall()}
     
-    for marketplace in marketplaces:
-        mp_id = marketplace['id']
+    cur.execute("SELECT marketplace_id FROM t_p86529894_ecommerce_management.marketplace_products")
+    mp_products = [row['marketplace_id'] for row in cur.fetchall()]
+    
+    cur.execute("SELECT marketplace_id, total_amount FROM t_p86529894_ecommerce_management.orders WHERE marketplace_id IS NOT NULL")
+    orders_data = cur.fetchall()
+    
+    product_counts = {}
+    for mp_id in mp_products:
+        product_counts[mp_id] = product_counts.get(mp_id, 0) + 1
+    
+    order_counts = {}
+    revenue_totals = {}
+    for order in orders_data:
+        mp_id = order['marketplace_id']
+        order_counts[mp_id] = order_counts.get(mp_id, 0) + 1
+        revenue_totals[mp_id] = revenue_totals.get(mp_id, 0) + float(order.get('total_amount', 0))
+    
+    marketplaces = []
+    for mp in marketplaces_raw:
+        mp_id = mp['id']
+        integration = integrations.get(mp_id)
         
-        cur.execute(f"""
-            SELECT COUNT(DISTINCT p.id) as cnt
-            FROM products p
-            JOIN marketplace_products mp ON p.id = mp.product_id
-            WHERE mp.marketplace_id = {mp_id}
-        """)
-        products_result = cur.fetchone()
-        marketplace['products_count'] = products_result['cnt'] if products_result else 0
-        
-        cur.execute(f"""
-            SELECT COUNT(*) as cnt
-            FROM orders
-            WHERE marketplace_id = {mp_id}
-        """)
-        orders_result = cur.fetchone()
-        marketplace['orders_count'] = orders_result['cnt'] if orders_result else 0
-        
-        cur.execute(f"""
-            SELECT SUM(total_amount) as total
-            FROM orders
-            WHERE marketplace_id = {mp_id}
-        """)
-        revenue_result = cur.fetchone()
-        marketplace['total_revenue'] = float(revenue_result['total']) if revenue_result and revenue_result['total'] else 0.0
+        marketplaces.append({
+            'id': mp['id'],
+            'name': mp['name'],
+            'slug': mp['slug'],
+            'logo_url': mp['logo_url'],
+            'description': mp['description'],
+            'is_connected': integration is not None,
+            'last_sync_at': integration['last_sync_at'] if integration else None,
+            'total_products': product_counts.get(mp_id, 0),
+            'total_orders': order_counts.get(mp_id, 0),
+            'total_revenue': revenue_totals.get(mp_id, 0)
+        })
     
     cur.close()
     conn.close()
     
-    return success_response({
-        'marketplaces': marketplaces,
-        'total': len(marketplaces)
-    })
+    return success_response({'marketplaces': marketplaces})
 
 
-def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Подключение нового маркетплейса"""
-    name = data.get('name')
-    api_key = data.get('apiKey')
-    client_id = data.get('clientId')
-    seller_id = data.get('sellerId')
-    
-    if not name:
-        return error_response('Marketplace name required', 400)
-    
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    name_escaped = name.replace("'", "''")
-    cur.execute(f"""
-        SELECT id FROM marketplaces
-        WHERE slug = '{name_escaped}' OR LOWER(name) = LOWER('{name_escaped}')
-        LIMIT 1
-    """)
-    
-    marketplace_result = cur.fetchone()
-    
-    if not marketplace_result:
-        cur.close()
-        conn.close()
-        return error_response(f'Marketplace {name} not found', 404)
-    
-    marketplace_id = marketplace_result['id']
-    user_id = 1
-    
-    cur.execute(f"""
-        SELECT id FROM user_marketplace_integrations
-        WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
-    """)
-    
-    existing = cur.fetchone()
-    
-    if existing:
-        api_key_escaped = (api_key or '').replace("'", "''")
-        seller_id_escaped = (seller_id or '').replace("'", "''")
-        client_id_escaped = (client_id or '').replace("'", "''")
-        last_sync = datetime.now()
-        cur.execute(f"""
-            UPDATE user_marketplace_integrations
-            SET api_key = '{api_key_escaped}', api_secret = '{seller_id_escaped}', store_id = '{client_id_escaped}', status = 'active', last_sync = '{last_sync}'
-            WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
-            RETURNING id
-        """)
-    else:
-        api_key_escaped = (api_key or '').replace("'", "''")
-        seller_id_escaped = (seller_id or '').replace("'", "''")
-        client_id_escaped = (client_id or '').replace("'", "''")
-        last_sync = datetime.now()
-        cur.execute(f"""
-            INSERT INTO user_marketplace_integrations 
-            (user_id, marketplace_id, api_key, api_secret, store_id, status, last_sync)
-            VALUES ({user_id}, {marketplace_id}, '{api_key_escaped}', '{seller_id_escaped}', '{client_id_escaped}', 'active', '{last_sync}')
-            RETURNING id
-        """)
-    
-    integration_id = cur.fetchone()['id']
-    
-    cur.execute(f"""
-        SELECT 
-            m.id,
-            m.name,
-            m.slug,
-            m.logo_url,
-            umi.api_key,
-            umi.store_id as client_id,
-            true as is_connected,
-            umi.last_sync as last_sync_at
-        FROM marketplaces m
-        JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
-        WHERE umi.id = {integration_id}
-    """)
-    
-    marketplace_info = cur.fetchone()
-    
-    cur.close()
-    conn.close()
-    
-    return success_response({
-        'marketplace': dict(marketplace_info),
-        'message': f'{name.title()} connected',
-        'success': True
-    })
-
-
-def disconnect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Отключение маркетплейса"""
-    marketplace_id = data.get('marketplaceId')
+def connect_marketplace(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Подключение маркетплейса"""
+    marketplace_id = body.get('marketplaceId')
+    api_key = body.get('apiKey', '')
+    store_id = body.get('storeId', '')
+    api_secret = body.get('apiSecret', '')
     
     if not marketplace_id:
         return error_response('Marketplace ID required', 400)
     
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    user_id = 1
+    cur.execute(f"SELECT id, slug FROM t_p86529894_ecommerce_management.marketplaces WHERE id = {mp_id} LIMIT 1")
+    marketplace = cur.fetchone()
+    
+    if not marketplace:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not found', 404)
+    
+    if marketplace['slug'].lower() == 'ozon' and (not api_key or not store_id):
+        cur.close()
+        conn.close()
+        return error_response('Ozon requires Client ID and API Key', 400)
+    
+    api_key_escaped = api_key.replace("'", "''")
+    store_id_escaped = store_id.replace("'", "''")
+    api_secret_escaped = api_secret.replace("'", "''")
     
     cur.execute(f"""
-        DELETE FROM user_marketplace_integrations
-        WHERE user_id = {user_id} AND marketplace_id = {marketplace_id}
-        RETURNING marketplace_id
+        SELECT id FROM t_p86529894_ecommerce_management.user_marketplace_integrations 
+        WHERE marketplace_id = {mp_id} AND user_id = 1
+        LIMIT 1
     """)
+    existing = cur.fetchone()
     
-    deleted = cur.fetchone()
+    if existing:
+        cur.execute(f"""
+            UPDATE t_p86529894_ecommerce_management.user_marketplace_integrations
+            SET api_key = '{api_key_escaped}', store_id = '{store_id_escaped}', 
+                api_secret = '{api_secret_escaped}', connected_at = CURRENT_TIMESTAMP
+            WHERE id = {existing['id']}
+        """)
+    else:
+        cur.execute(f"""
+            INSERT INTO t_p86529894_ecommerce_management.user_marketplace_integrations 
+            (user_id, marketplace_id, api_key, store_id, api_secret, connected_at)
+            VALUES (1, {mp_id}, '{api_key_escaped}', '{store_id_escaped}', 
+                   '{api_secret_escaped}', CURRENT_TIMESTAMP)
+        """)
     
     cur.close()
     conn.close()
     
-    if not deleted:
-        return error_response('Integration not found', 404)
+    return success_response({'message': 'Marketplace connected successfully'})
+
+
+def disconnect_marketplace(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Отключение маркетплейса"""
+    marketplace_id = body.get('marketplaceId')
     
-    return success_response({
-        'success': True,
-        'message': 'Marketplace disconnected'
-    })
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        DELETE FROM t_p86529894_ecommerce_management.user_marketplace_integrations
+        WHERE marketplace_id = {mp_id} AND user_id = 1
+    """)
+    
+    cur.close()
+    conn.close()
+    
+    return success_response({'message': 'Marketplace disconnected'})
 
 
 def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
@@ -620,33 +598,71 @@ def get_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
     if marketplace:
         marketplace_escaped = marketplace.replace("'", "''")
         cur.execute(f"""
-            SELECT 
-                p.*,
-                mp.marketplace_id,
-                mp.price as marketplace_price,
-                mp.stock as marketplace_stock,
-                m.name as marketplace_name
-            FROM products p
-            LEFT JOIN marketplace_products mp ON p.id = mp.product_id
-            LEFT JOIN marketplaces m ON mp.marketplace_id = m.id
-            WHERE m.slug = '{marketplace_escaped}' OR LOWER(m.name) = LOWER('{marketplace_escaped}')
+            SELECT p.*, mp.price as marketplace_price, mp.stock as marketplace_stock
+            FROM t_p86529894_ecommerce_management.products p
+            JOIN t_p86529894_ecommerce_management.marketplace_products mp ON p.id = mp.product_id
+            JOIN t_p86529894_ecommerce_management.marketplaces m ON mp.marketplace_id = m.id
+            WHERE m.slug = '{marketplace_escaped}'
             ORDER BY p.created_at DESC
         """)
     else:
         cur.execute("""
-            SELECT * FROM products 
+            SELECT * FROM t_p86529894_ecommerce_management.products 
             ORDER BY created_at DESC
         """)
     
-    products = [dict(p) for p in cur.fetchall()]
+    products = [dict(row) for row in cur.fetchall()]
     
     cur.close()
     conn.close()
     
-    return success_response({
-        'products': products,
-        'total': len(products)
-    })
+    return success_response({'products': products})
+
+
+def update_product(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Обновление товара"""
+    product_id = body.get('productId')
+    price = body.get('price')
+    cost_price = body.get('costPrice')
+    stock = body.get('stock')
+    
+    if not product_id:
+        return error_response('Product ID required', 400)
+    
+    try:
+        prod_id = int(product_id)
+    except ValueError:
+        return error_response('Invalid product ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    updates = []
+    if price is not None:
+        updates.append(f'price = {float(price)}')
+    if cost_price is not None:
+        updates.append(f'cost_price = {float(cost_price)}')
+    if stock is not None:
+        updates.append(f'stock = {int(stock)}')
+    
+    if not updates:
+        cur.close()
+        conn.close()
+        return error_response('No fields to update', 400)
+    
+    updates.append('updated_at = CURRENT_TIMESTAMP')
+    update_query = ', '.join(updates)
+    
+    cur.execute(f"""
+        UPDATE t_p86529894_ecommerce_management.products
+        SET {update_query}
+        WHERE id = {prod_id}
+    """)
+    
+    cur.close()
+    conn.close()
+    
+    return success_response({'message': 'Product updated'})
 
 
 def get_orders(status: Optional[str] = None, marketplace: Optional[str] = None) -> Dict[str, Any]:
@@ -654,150 +670,184 @@ def get_orders(status: Optional[str] = None, marketplace: Optional[str] = None) 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("""
-        SELECT 
-            o.*,
-            c.name as customer_name,
-            c.email as customer_email,
-            m.name as marketplace_name,
-            o.created_at as order_date
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
-        LEFT JOIN marketplaces m ON o.marketplace_id = m.id
+    where_clauses = []
+    
+    if status:
+        status_escaped = status.replace("'", "''")
+        where_clauses.append(f"o.status = '{status_escaped}'")
+    
+    if marketplace:
+        marketplace_escaped = marketplace.replace("'", "''")
+        where_clauses.append(f"m.slug = '{marketplace_escaped}'")
+    
+    where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
+    
+    cur.execute(f"""
+        SELECT o.*, c.name as customer_name, c.email as customer_email,
+               m.name as marketplace_name, m.slug as marketplace_slug
+        FROM t_p86529894_ecommerce_management.orders o
+        JOIN t_p86529894_ecommerce_management.customers c ON o.customer_id = c.id
+        LEFT JOIN t_p86529894_ecommerce_management.marketplaces m ON o.marketplace_id = m.id
+        WHERE {where_sql}
         ORDER BY o.created_at DESC
     """)
     
-    all_orders = [dict(order) for order in cur.fetchall()]
+    orders = [dict(row) for row in cur.fetchall()]
     
     cur.close()
     conn.close()
     
-    filtered_orders = all_orders
-    
-    if status and status != 'all':
-        filtered_orders = [o for o in filtered_orders if o['status'] == status]
-    
-    if marketplace and marketplace != 'all':
-        marketplace_lower = marketplace.lower()
-        filtered_orders = [o for o in filtered_orders if o.get('marketplace_name') and o['marketplace_name'].lower() == marketplace_lower]
-    
-    return success_response({
-        'orders': filtered_orders,
-        'total': len(filtered_orders)
-    })
+    return success_response({'orders': orders})
 
 
-def update_order_status(data: Dict[str, Any]) -> Dict[str, Any]:
+def update_order_status(body: Dict[str, Any]) -> Dict[str, Any]:
     """Обновление статуса заказа"""
-    order_id = data.get('orderId')
-    new_status = data.get('status')
+    order_id = body.get('orderId')
+    status = body.get('status')
     
-    if not order_id or not new_status:
+    if not order_id or not status:
         return error_response('Order ID and status required', 400)
+    
+    try:
+        ord_id = int(order_id)
+    except ValueError:
+        return error_response('Invalid order ID', 400)
+    
+    status_escaped = status.replace("'", "''")
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    status_escaped = new_status.replace("'", "''")
-    
     cur.execute(f"""
-        UPDATE orders
+        UPDATE t_p86529894_ecommerce_management.orders
         SET status = '{status_escaped}', updated_at = CURRENT_TIMESTAMP
-        WHERE id = {order_id}
-        RETURNING *
+        WHERE id = {ord_id}
     """)
-    
-    order = cur.fetchone()
     
     cur.close()
     conn.close()
     
-    if not order:
-        return error_response('Order not found', 404)
+    return success_response({'message': 'Order status updated'})
+
+
+def ship_order(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Отправка заказа"""
+    order_id = body.get('orderId')
+    tracking_number = body.get('trackingNumber', '')
     
-    return success_response({
-        'order': dict(order),
-        'message': f'Status updated to {new_status}'
-    })
+    if not order_id:
+        return error_response('Order ID required', 400)
+    
+    try:
+        ord_id = int(order_id)
+    except ValueError:
+        return error_response('Invalid order ID', 400)
+    
+    tracking_escaped = tracking_number.replace("'", "''")
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        UPDATE t_p86529894_ecommerce_management.orders
+        SET status = 'shipped', tracking_number = '{tracking_escaped}', 
+            shipped_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = {ord_id}
+    """)
+    
+    cur.close()
+    conn.close()
+    
+    return success_response({'message': 'Order shipped'})
 
 
 def get_analytics(period: str = '30d') -> Dict[str, Any]:
-    """Получение аналитики за период"""
-    days_map = {'7d': 7, '30d': 30, '90d': 90, '365d': 365}
-    days = days_map.get(period, 30)
+    """Получение аналитики"""
+    days = int(period.replace('d', ''))
+    since_date = datetime.now() - timedelta(days=days)
+    previous_since = since_date - timedelta(days=days)
     
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("SELECT * FROM orders")
-    all_orders = [dict(o) for o in cur.fetchall()]
-    
-    start_date = datetime.now() - timedelta(days=days)
-    previous_start = start_date - timedelta(days=days)
-    
-    filtered_orders = [
-        o for o in all_orders 
-        if o.get('created_at') and o['created_at'] >= start_date
-    ]
-    
-    previous_orders = [
-        o for o in all_orders 
-        if o.get('created_at') and previous_start <= o['created_at'] < start_date
-    ]
-    
-    total_orders = len(filtered_orders)
-    total_revenue = sum(float(o['total_amount']) for o in filtered_orders)
-    avg_order_value = total_revenue / total_orders if total_orders > 0 else 0.0
-    
-    previous_total = len(previous_orders)
-    growth_rate = ((total_orders - previous_total) / previous_total * 100) if previous_total > 0 else 0.0
-    
-    from collections import defaultdict
-    daily_dict = defaultdict(lambda: {'orders': 0, 'revenue': 0.0})
-    
-    for o in filtered_orders:
-        if o.get('created_at'):
-            date_key = o['created_at'].date()
-            daily_dict[date_key]['orders'] += 1
-            daily_dict[date_key]['revenue'] += float(o['total_amount'])
-    
-    daily_data = [
-        {'date': str(date), 'orders': data['orders'], 'revenue': data['revenue']}
-        for date, data in sorted(daily_dict.items())
-    ]
-    
-    cur.execute("""
-        SELECT m.name, COUNT(o.id) as orders, SUM(o.total_amount) as revenue
-        FROM orders o
-        JOIN marketplaces m ON o.marketplace_id = m.id
-        GROUP BY m.name
-        ORDER BY revenue DESC
+    cur.execute(f"""
+        SELECT o.*, m.name as marketplace_name, m.slug as marketplace_slug
+        FROM t_p86529894_ecommerce_management.orders o
+        LEFT JOIN t_p86529894_ecommerce_management.marketplaces m ON o.marketplace_id = m.id
+        WHERE o.created_at >= '{since_date.isoformat()}'
+        ORDER BY o.created_at DESC
     """)
+    current_orders = [dict(row) for row in cur.fetchall()]
     
-    marketplace_stats = []
-    for row in cur.fetchall():
-        marketplace_stats.append({
-            'name': row['name'],
-            'orders': row['orders'],
-            'revenue': float(row['revenue']) if row['revenue'] else 0.0
-        })
+    cur.execute(f"""
+        SELECT o.*
+        FROM t_p86529894_ecommerce_management.orders o
+        WHERE o.created_at >= '{previous_since.isoformat()}' 
+          AND o.created_at < '{since_date.isoformat()}'
+    """)
+    previous_orders = [dict(row) for row in cur.fetchall()]
+    
+    total_orders = len(current_orders)
+    previous_total = len(previous_orders)
+    
+    growth_rate = 0
+    if previous_total > 0:
+        growth_rate = ((total_orders - previous_total) / previous_total) * 100
+    elif total_orders > 0:
+        growth_rate = 100
+    
+    total_revenue = sum(float(o.get('total_amount', 0)) for o in current_orders)
     
     total_views = total_orders * 3
     cart_adds = total_orders * 2
     checkouts = int(total_orders * 1.5)
     completed = total_orders
     
-    conversion_rate = (completed / total_views * 100) if total_views > 0 else 0.0
+    conversion_rate = 0
+    if total_views > 0:
+        conversion_rate = (completed / total_views) * 100
     
     conversion_funnel = [
         {'stage': 'Просмотры товаров', 'count': total_views, 'percentage': 100.0},
-        {'stage': 'Добавили в корзину', 'count': cart_adds, 'percentage': (cart_adds / total_views * 100) if total_views > 0 else 0},
-        {'stage': 'Начали оформление', 'count': checkouts, 'percentage': (checkouts / total_views * 100) if total_views > 0 else 0},
+        {'stage': 'Добавили в корзину', 'count': cart_adds, 'percentage': (cart_adds / total_views * 100) if total_views else 0},
+        {'stage': 'Начали оформление', 'count': checkouts, 'percentage': (checkouts / total_views * 100) if total_views else 0},
         {'stage': 'Завершили заказ', 'count': completed, 'percentage': conversion_rate}
     ]
     
-    cur.execute("SELECT COUNT(DISTINCT marketplace_id) as cnt FROM orders")
-    active_marketplaces = cur.fetchone()['cnt'] or 0
+    marketplace_stats = {}
+    for order in current_orders:
+        mp_name = order.get('marketplace_name', 'Unknown')
+        if mp_name not in marketplace_stats:
+            marketplace_stats[mp_name] = {'orders': 0, 'revenue': 0}
+        marketplace_stats[mp_name]['orders'] += 1
+        marketplace_stats[mp_name]['revenue'] += float(order.get('total_amount', 0))
+    
+    by_marketplace = [
+        {
+            'marketplace': name,
+            'orders': stats['orders'],
+            'revenue': stats['revenue']
+        }
+        for name, stats in marketplace_stats.items()
+    ]
+    
+    daily_stats_dict = {}
+    for order in current_orders:
+        order_date = order.get('created_at')
+        if isinstance(order_date, datetime):
+            date_str = order_date.strftime('%Y-%m-%d')
+        else:
+            date_str = str(order_date)[:10]
+        
+        if date_str not in daily_stats_dict:
+            daily_stats_dict[date_str] = {'orders': 0, 'revenue': 0}
+        daily_stats_dict[date_str]['orders'] += 1
+        daily_stats_dict[date_str]['revenue'] += float(order.get('total_amount', 0))
+    
+    daily_stats = [
+        {'date': date, 'orders': stats['orders'], 'revenue': stats['revenue']}
+        for date, stats in sorted(daily_stats_dict.items())
+    ]
     
     cur.close()
     conn.close()
@@ -806,72 +856,68 @@ def get_analytics(period: str = '30d') -> Dict[str, Any]:
         'summary': {
             'total_orders': total_orders,
             'total_revenue': total_revenue,
-            'avg_order_value': avg_order_value,
-            'active_marketplaces': active_marketplaces,
-            'conversion_rate': conversion_rate,
-            'growth_rate': growth_rate
+            'conversion_rate': round(conversion_rate, 2),
+            'growth_rate': round(growth_rate, 2)
         },
-        'daily': daily_data,
-        'byMarketplace': marketplace_stats,
-        'conversionFunnel': conversion_funnel
+        'conversionFunnel': conversion_funnel,
+        'byMarketplace': by_marketplace,
+        'dailyStats': daily_stats
     })
 
 
 def get_dashboard() -> Dict[str, Any]:
-    """Получение данных для дашборда"""
+    """Получение данных для главного дашборда"""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
-    cur.execute("SELECT COUNT(*) as cnt FROM marketplaces")
-    total_marketplaces = cur.fetchone()['cnt']
+    cur.execute("SELECT COUNT(*) as total FROM t_p86529894_ecommerce_management.marketplaces")
+    total_marketplaces = cur.fetchone()['total']
     
-    cur.execute("SELECT COUNT(*) as cnt FROM user_marketplace_integrations WHERE user_id = 1")
-    connected_marketplaces = cur.fetchone()['cnt']
+    cur.execute("""
+        SELECT COUNT(*) as connected 
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations 
+        WHERE user_id = 1
+    """)
+    connected_marketplaces = cur.fetchone()['connected']
     
-    cur.execute("SELECT COUNT(*) as cnt FROM products")
-    total_products = cur.fetchone()['cnt']
+    cur.execute("SELECT COUNT(*) as total FROM t_p86529894_ecommerce_management.products")
+    total_products = cur.fetchone()['total']
     
-    cur.execute("SELECT COUNT(*) as cnt FROM orders")
-    total_orders = cur.fetchone()['cnt']
+    cur.execute("SELECT COUNT(*) as total FROM t_p86529894_ecommerce_management.orders")
+    total_orders = cur.fetchone()['total']
     
-    cur.execute("SELECT * FROM orders")
-    all_orders = [dict(o) for o in cur.fetchall()]
-    total_revenue = sum(float(o['total_amount']) for o in all_orders)
+    cur.execute("SELECT COALESCE(SUM(total_amount), 0) as revenue FROM t_p86529894_ecommerce_management.orders")
+    total_revenue = float(cur.fetchone()['revenue'])
     
     cur.execute("""
         SELECT o.*, c.name as customer_name
-        FROM orders o
-        LEFT JOIN customers c ON o.customer_id = c.id
+        FROM t_p86529894_ecommerce_management.orders o
+        JOIN t_p86529894_ecommerce_management.customers c ON o.customer_id = c.id
         ORDER BY o.created_at DESC
         LIMIT 5
     """)
-    recent_orders = [dict(o) for o in cur.fetchall()]
-    for order in recent_orders:
-        order['order_date'] = str(order.get('created_at', ''))
+    recent_orders = [dict(row) for row in cur.fetchall()]
     
     cur.execute("""
-        SELECT * FROM products
-        WHERE stock < 10
-        ORDER BY stock ASC
+        SELECT p.*, COALESCE(p.stock, 0) as total_stock
+        FROM t_p86529894_ecommerce_management.products p
+        WHERE COALESCE(p.stock, 0) < 10
+        ORDER BY p.stock ASC
         LIMIT 5
     """)
-    low_stock_products = [dict(p) for p in cur.fetchall()]
-    for product in low_stock_products:
-        product['total_stock'] = product.get('stock', 0)
+    low_stock_products = [dict(row) for row in cur.fetchall()]
     
     cur.close()
     conn.close()
     
-    stats = {
-        'total_marketplaces': total_marketplaces,
-        'connected_marketplaces': connected_marketplaces,
-        'total_products': total_products,
-        'total_orders': total_orders,
-        'total_revenue': total_revenue
-    }
-    
     return success_response({
-        'stats': stats,
+        'stats': {
+            'total_marketplaces': total_marketplaces,
+            'connected_marketplaces': connected_marketplaces,
+            'total_products': total_products,
+            'total_orders': total_orders,
+            'total_revenue': total_revenue
+        },
         'recentOrders': recent_orders,
         'lowStockProducts': low_stock_products
     })
@@ -884,15 +930,15 @@ def cors_response() -> Dict[str, Any]:
         'headers': {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Auth-Token, X-Session-Id',
+            'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Auth-Token',
             'Access-Control-Max-Age': '86400'
         },
         'body': ''
     }
 
 
-def success_response(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Успешный HTTP response"""
+def success_response(data: Any) -> Dict[str, Any]:
+    """Success response helper"""
     return {
         'statusCode': 200,
         'headers': {
@@ -905,7 +951,7 @@ def success_response(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def error_response(message: str, status_code: int = 500) -> Dict[str, Any]:
-    """HTTP response с ошибкой"""
+    """Error response helper"""
     return {
         'statusCode': status_code,
         'headers': {
@@ -913,5 +959,5 @@ def error_response(message: str, status_code: int = 500) -> Dict[str, Any]:
             'Access-Control-Allow-Origin': '*'
         },
         'isBase64Encoded': False,
-        'body': json.dumps({'error': message}, default=str)
+        'body': json.dumps({'error': message})
     }

@@ -3,13 +3,16 @@ export interface Marketplace {
   name: string;
   slug?: string;
   logo_url?: string;
+  description?: string;
   country?: string;
   api_key: string | null;
   client_id: string | null;
   is_connected: boolean;
-  products_count: number;
-  orders_count: number;
-  total_revenue: number;
+  total_products?: number;
+  total_orders?: number;
+  total_revenue?: number;
+  products_count?: number;
+  orders_count?: number;
   last_sync_at: string | null;
 }
 

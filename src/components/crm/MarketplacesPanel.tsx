@@ -7,6 +7,7 @@ import { Marketplace, marketplaceInfo, CRM_API } from './marketplace/types';
 import MarketplaceConnectDialog from './marketplace/MarketplaceConnectDialog';
 import MarketplaceSettingsDialog from './marketplace/MarketplaceSettingsDialog';
 import MarketplaceCard from './marketplace/MarketplaceCard';
+import MarketplaceDetailView from './marketplace/MarketplaceDetailView';
 
 const MarketplacesPanel: React.FC = () => {
   const { toast } = useToast();
@@ -16,6 +17,8 @@ const MarketplacesPanel: React.FC = () => {
   const [settingsDialog, setSettingsDialog] = useState(false);
   const [selectedMarketplaceData, setSelectedMarketplaceData] = useState<Marketplace | null>(null);
   const [syncing, setSyncing] = useState<{[key: number]: boolean}>({});
+  const [viewMode, setViewMode] = useState<'list' | 'detail'>('list');
+  const [selectedMarketplace, setSelectedMarketplace] = useState<{id: number, name: string} | null>(null);
 
   useEffect(() => {
     loadMarketplaces();
@@ -59,6 +62,17 @@ const MarketplacesPanel: React.FC = () => {
     }).format(amount);
   };
 
+  const handleViewMarketplace = (marketplace: Marketplace) => {
+    setSelectedMarketplace({ id: marketplace.id, name: marketplace.name });
+    setViewMode('detail');
+  };
+
+  const handleBackToList = () => {
+    setViewMode('list');
+    setSelectedMarketplace(null);
+    loadMarketplaces();
+  };
+
   const handleSync = async (marketplaceId: number, marketplaceName: string) => {
     setSyncing(prev => ({...prev, [marketplaceId]: true}));
     
@@ -78,7 +92,7 @@ const MarketplacesPanel: React.FC = () => {
         description: `${marketplaceInfo[marketplaceName]?.displayName || marketplaceName}: загружаю данные...`
       });
       
-      const response = await fetch(`${CRM_API}/?action=fullSync&marketplaceId=${marketplaceId}`, {
+      const response = await fetch(`${CRM_API}/?action=syncMarketplace&marketplaceId=${marketplaceId}`, {
         method: 'POST'
       });
       
@@ -157,6 +171,16 @@ const MarketplacesPanel: React.FC = () => {
     );
   }
 
+  if (viewMode === 'detail' && selectedMarketplace) {
+    return (
+      <MarketplaceDetailView
+        marketplaceId={selectedMarketplace.id}
+        marketplaceName={selectedMarketplace.name}
+        onBack={handleBackToList}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -207,6 +231,7 @@ const MarketplacesPanel: React.FC = () => {
               onOpenSettings={openSettingsDialog}
               onOpenConnect={openConnectDialog}
               onSync={handleSync}
+              onView={handleViewMarketplace}
               syncing={syncing[marketplace.id] || false}
             />
           ))}

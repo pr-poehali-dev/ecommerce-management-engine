@@ -10,6 +10,7 @@ interface MarketplaceCardProps {
   onOpenSettings: (marketplace: Marketplace) => void;
   onOpenConnect: (marketplaceName: string) => void;
   onSync: (id: number, name: string) => void;
+  onView?: (marketplace: Marketplace) => void;
   syncing?: boolean;
 }
 
@@ -19,6 +20,7 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
   onOpenSettings,
   onOpenConnect,
   onSync,
+  onView,
   syncing = false
 }) => {
   const slug = marketplace.slug || marketplace.name.toLowerCase();
@@ -61,11 +63,11 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
       <div className="space-y-3 relative z-10">
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Товары</span>
-          <span className="font-semibold">{marketplace.products_count}</span>
+          <span className="font-semibold">{marketplace.total_products || marketplace.products_count || 0}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Заказы</span>
-          <span className="font-semibold">{marketplace.orders_count}</span>
+          <span className="font-semibold">{marketplace.total_orders || marketplace.orders_count || 0}</span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Выручка</span>
@@ -75,7 +77,7 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
 
       {marketplace.is_connected && (
         <div className="mt-4 pt-4 border-t relative z-10">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
             <Icon name="Clock" className="h-3 w-3" />
             <span>
               {marketplace.last_sync_at
@@ -83,25 +85,38 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
                 : 'Не синхронизировано'}
             </span>
           </div>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full mt-3"
-            onClick={() => onSync(marketplace.id, marketplace.slug || marketplace.name)}
-            disabled={syncing}
-          >
-            {syncing ? (
-              <>
-                <div className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full mr-2" />
-                Синхронизация...
-              </>
-            ) : (
-              <>
-                <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
-                Синхронизировать
-              </>
+          <div className="flex gap-2">
+            {onView && (
+              <Button 
+                variant="default" 
+                size="sm" 
+                className="flex-1"
+                onClick={() => onView(marketplace)}
+              >
+                <Icon name="Eye" className="mr-2 h-3 w-3" />
+                Открыть
+              </Button>
             )}
-          </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex-1"
+              onClick={() => onSync(marketplace.id, marketplace.slug || marketplace.name)}
+              disabled={syncing}
+            >
+              {syncing ? (
+                <>
+                  <div className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full mr-2" />
+                  Синхр...
+                </>
+              ) : (
+                <>
+                  <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
+                  Синхр
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       )}
 
