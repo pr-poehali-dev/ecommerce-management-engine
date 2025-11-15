@@ -55,6 +55,14 @@ const App = () => {
                   path="/" 
                   element={
                     isAuthenticated ? 
+                    <Navigate to="/crm" replace /> : 
+                    <Navigate to="/login" replace />
+                  } 
+                />
+                <Route 
+                  path="/old" 
+                  element={
+                    isAuthenticated ? 
                     <Index onLogout={() => {
                       setIsAuthenticated(false);
                       localStorage.removeItem('user');
