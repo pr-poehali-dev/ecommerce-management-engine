@@ -10,6 +10,7 @@ interface MarketplaceCardProps {
   onOpenSettings: (marketplace: Marketplace) => void;
   onOpenConnect: (marketplaceName: string) => void;
   onSync: (id: number, name: string) => void;
+  syncing?: boolean;
 }
 
 const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
@@ -17,7 +18,8 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
   formatMoney,
   onOpenSettings,
   onOpenConnect,
-  onSync
+  onSync,
+  syncing = false
 }) => {
   const slug = marketplace.slug || marketplace.name.toLowerCase();
   const info = marketplaceInfo[slug] || marketplaceInfo[marketplace.name] || {
@@ -86,9 +88,19 @@ const MarketplaceCard: React.FC<MarketplaceCardProps> = ({
             size="sm" 
             className="w-full mt-3"
             onClick={() => onSync(marketplace.id, marketplace.slug || marketplace.name)}
+            disabled={syncing}
           >
-            <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
-            Синхронизировать
+            {syncing ? (
+              <>
+                <div className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full mr-2" />
+                Синхронизация...
+              </>
+            ) : (
+              <>
+                <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
+                Синхронизировать
+              </>
+            )}
           </Button>
         </div>
       )}

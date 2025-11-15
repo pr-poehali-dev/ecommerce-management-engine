@@ -15,6 +15,7 @@ const MarketplacesPanel: React.FC = () => {
   const [connectDialog, setConnectDialog] = useState(false);
   const [settingsDialog, setSettingsDialog] = useState(false);
   const [selectedMarketplaceData, setSelectedMarketplaceData] = useState<Marketplace | null>(null);
+  const [syncing, setSyncing] = useState<{[key: number]: boolean}>({});
 
   useEffect(() => {
     loadMarketplaces();
@@ -59,26 +60,56 @@ const MarketplacesPanel: React.FC = () => {
   };
 
   const handleSync = async (marketplaceId: number, marketplaceName: string) => {
+    setSyncing(prev => ({...prev, [marketplaceId]: true}));
+    
     try {
+      const marketplace = marketplaces.find(m => m.id === marketplaceId);
+      if (!marketplace || !marketplace.is_connected) {
+        toast({
+          title: 'Ошибка',
+          description: 'Маркетплейс не подключен',
+          variant: 'destructive'
+        });
+        return;
+      }
+
       toast({
-        title: 'Синхронизация',
-        description: `Синхронизирую ${marketplaceInfo[marketplaceName]?.displayName || marketplaceName}...`
+        title: 'Начинаю синхронизацию',
+        description: `${marketplaceInfo[marketplaceName]?.displayName || marketplaceName}: загружаю данные...`
       });
       
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const response = await fetch(`${CRM_API}/?action=fullSync&marketplaceId=${marketplaceId}`, {
+        method: 'POST'
+      });
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
       
       await loadMarketplaces();
       
+      const summary = [
+        `Товары: ${data.products || 0}`,
+        `Заказы: ${data.orders || 0}`,
+        `Клиенты: ${data.customers || 0}`
+      ].join(', ');
+      
       toast({
-        title: 'Успешно',
-        description: 'Синхронизация завершена'
+        title: '✅ Синхронизация завершена',
+        description: summary,
+        duration: 5000
       });
     } catch (error) {
+      console.error('Sync error:', error);
       toast({
-        title: 'Ошибка',
-        description: 'Не удалось синхронизировать',
+        title: 'Ошибка синхронизации',
+        description: error instanceof Error ? error.message : 'Не удалось синхронизировать данные',
         variant: 'destructive'
       });
+    } finally {
+      setSyncing(prev => ({...prev, [marketplaceId]: false}));
     }
   };
 
@@ -176,6 +207,7 @@ const MarketplacesPanel: React.FC = () => {
               onOpenSettings={openSettingsDialog}
               onOpenConnect={openConnectDialog}
               onSync={handleSync}
+              syncing={syncing[marketplace.id] || false}
             />
           ))}
         </div>

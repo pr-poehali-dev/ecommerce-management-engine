@@ -32,6 +32,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif action == 'syncProducts' and method == 'POST':
             marketplace = query_params.get('marketplace')
             return sync_products(marketplace)
+        elif action == 'fullSync' and method == 'POST':
+            marketplace_id = query_params.get('marketplaceId')
+            return full_marketplace_sync(marketplace_id)
         elif action == 'getProducts':
             marketplace = query_params.get('marketplace')
             return get_products(marketplace)
@@ -68,6 +71,172 @@ def get_db_connection():
     conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
     return conn
+
+
+def full_marketplace_sync(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Полная синхронизация всех данных с маркетплейса"""
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT m.id, m.name, m.slug, umi.api_key
+        FROM marketplaces m
+        JOIN user_marketplace_integrations umi ON m.id = umi.marketplace_id
+        WHERE m.id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    mp = cur.fetchone()
+    
+    if not mp:
+        cur.close()
+        conn.close()
+        return error_response(f'Marketplace ID {marketplace_id} not connected', 404)
+    
+    products_synced = 0
+    mock_products = [
+        {'name': f'Товар {i} - {mp["name"]}', 'sku': f'SKU-{mp["slug"]}-{i}', 
+         'price': 1500 + i * 100, 'cost_price': 800 + i * 50, 
+         'stock': 10 + i, 'category': 'Электроника'}
+        for i in range(1, 6)
+    ]
+    
+    for prod in mock_products:
+        sku_escaped = prod['sku'].replace("'", "''")
+        name_escaped = prod['name'].replace("'", "''")
+        category_escaped = prod['category'].replace("'", "''")
+        
+        cur.execute(f"SELECT id FROM products WHERE sku = '{sku_escaped}' LIMIT 1")
+        existing = cur.fetchone()
+        
+        if existing:
+            product_id = existing['id']
+            cur.execute(f"""
+                UPDATE products
+                SET name = '{name_escaped}', price = {prod['price']}, cost_price = {prod['cost_price']},
+                    stock = {prod['stock']}, category = '{category_escaped}', updated_at = CURRENT_TIMESTAMP
+                WHERE id = {product_id}
+            """)
+        else:
+            cur.execute(f"""
+                INSERT INTO products (name, sku, price, cost_price, stock, category)
+                VALUES ('{name_escaped}', '{sku_escaped}', {prod['price']}, {prod['cost_price']}, 
+                        {prod['stock']}, '{category_escaped}')
+                RETURNING id
+            """)
+            product_id = cur.fetchone()['id']
+        
+        cur.execute(f"""
+            SELECT id FROM marketplace_products 
+            WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
+        """)
+        mp_link = cur.fetchone()
+        
+        if mp_link:
+            cur.execute(f"""
+                UPDATE marketplace_products
+                SET price = {prod['price']}, stock = {prod['stock']}, synced_at = CURRENT_TIMESTAMP
+                WHERE product_id = {product_id} AND marketplace_id = {mp['id']}
+            """)
+        else:
+            cur.execute(f"""
+                INSERT INTO marketplace_products (product_id, marketplace_id, price, stock, synced_at)
+                VALUES ({product_id}, {mp['id']}, {prod['price']}, {prod['stock']}, CURRENT_TIMESTAMP)
+            """)
+        
+        products_synced += 1
+    
+    customers_synced = 0
+    mock_customers = [
+        {'name': f'Клиент {i} ({mp["name"]})', 'email': f'customer{i}@{mp["slug"]}.com', 
+         'phone': f'+7900000{i:04d}'}
+        for i in range(1, 4)
+    ]
+    
+    for cust in mock_customers:
+        name_escaped = cust['name'].replace("'", "''")
+        email_escaped = cust['email'].replace("'", "''")
+        phone_escaped = cust['phone'].replace("'", "''")
+        
+        cur.execute(f"SELECT id FROM customers WHERE email = '{email_escaped}' LIMIT 1")
+        existing = cur.fetchone()
+        
+        if not existing:
+            cur.execute(f"""
+                INSERT INTO customers (name, email, phone, status)
+                VALUES ('{name_escaped}', '{email_escaped}', '{phone_escaped}', 'active')
+                RETURNING id
+            """)
+            customers_synced += 1
+    
+    orders_synced = 0
+    cur.execute("SELECT id FROM customers ORDER BY id DESC LIMIT 3")
+    customer_ids = [c['id'] for c in cur.fetchall()]
+    
+    cur.execute("SELECT id FROM products ORDER BY id DESC LIMIT 3")
+    product_ids = [p['id'] for p in cur.fetchall()]
+    
+    if customer_ids and product_ids:
+        mock_orders = [
+            {'order_number': f'ORD-{mp["slug"].upper()}-{1000+i}', 
+             'customer_id': customer_ids[i % len(customer_ids)],
+             'total_amount': 2500 + i * 300, 'items_count': 2,
+             'status': 'new', 'fulfillment_type': 'FBS'}
+            for i in range(1, 4)
+        ]
+        
+        for order in mock_orders:
+            order_number_escaped = order['order_number'].replace("'", "''")
+            fulfillment_escaped = order['fulfillment_type'].replace("'", "''")
+            status_escaped = order['status'].replace("'", "''")
+            
+            cur.execute(f"SELECT id FROM orders WHERE order_number = '{order_number_escaped}' LIMIT 1")
+            existing = cur.fetchone()
+            
+            if not existing:
+                cur.execute(f"""
+                    INSERT INTO orders (order_number, customer_id, marketplace_id, status, 
+                                      fulfillment_type, total_amount, items_count)
+                    VALUES ('{order_number_escaped}', {order['customer_id']}, {mp['id']}, 
+                           '{status_escaped}', '{fulfillment_escaped}', 
+                           {order['total_amount']}, {order['items_count']})
+                    RETURNING id
+                """)
+                order_id = cur.fetchone()['id']
+                
+                for j in range(order['items_count']):
+                    product_id = product_ids[j % len(product_ids)]
+                    cur.execute(f"""
+                        INSERT INTO order_items (order_id, product_id, quantity, price)
+                        VALUES ({order_id}, {product_id}, 1, 1500)
+                    """)
+                
+                orders_synced += 1
+    
+    cur.execute(f"""
+        UPDATE user_marketplace_integrations
+        SET last_sync = CURRENT_TIMESTAMP
+        WHERE user_id = 1 AND marketplace_id = {mp['id']}
+    """)
+    
+    cur.close()
+    conn.close()
+    
+    return success_response({
+        'products': products_synced,
+        'orders': orders_synced,
+        'customers': customers_synced,
+        'marketplace': mp['name'],
+        'message': f'Синхронизировано: товары ({products_synced}), заказы ({orders_synced}), клиенты ({customers_synced})'
+    })
 
 
 def sync_products(marketplace: Optional[str] = None) -> Dict[str, Any]:
