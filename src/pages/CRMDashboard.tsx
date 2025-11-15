@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 import AnalyticsPanel from '@/components/crm/AnalyticsPanel';
@@ -44,6 +47,8 @@ const CRMDashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     loadDashboard();
@@ -138,13 +143,31 @@ const CRMDashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={loadDashboard}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={loadDashboard}
+                title="Обновить данные"
+              >
                 <Icon name="RefreshCw" className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm">
-                <Icon name="Bell" className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm">
+              <div className="relative">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setNotificationsOpen(!notificationsOpen)}
+                  title="Уведомления"
+                >
+                  <Icon name="Bell" className="h-4 w-4" />
+                </Button>
+                <span className="absolute -top-1 -right-1 h-2 w-2 bg-red-500 rounded-full" />
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setSettingsOpen(!settingsOpen)}
+                title="Настройки"
+              >
                 <Icon name="Settings" className="h-4 w-4" />
               </Button>
             </div>
@@ -418,6 +441,129 @@ const CRMDashboard: React.FC = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Уведомления</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Icon name="Info" className="h-5 w-5 text-blue-500 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Новый заказ на Ozon</p>
+                  <p className="text-xs text-muted-foreground mt-1">Заказ #12345 на сумму 2,500 ₽</p>
+                  <p className="text-xs text-muted-foreground mt-1">5 минут назад</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Icon name="AlertTriangle" className="h-5 w-5 text-yellow-500 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Низкий остаток товара</p>
+                  <p className="text-xs text-muted-foreground mt-1">Товар "Смартфон XYZ" - осталось 3 шт</p>
+                  <p className="text-xs text-muted-foreground mt-1">1 час назад</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Icon name="CheckCircle" className="h-5 w-5 text-green-500 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Синхронизация завершена</p>
+                  <p className="text-xs text-muted-foreground mt-1">Wildberries успешно синхронизирован</p>
+                  <p className="text-xs text-muted-foreground mt-1">2 часа назад</p>
+                </div>
+              </div>
+            </div>
+
+            <Button variant="outline" className="w-full" onClick={() => setNotificationsOpen(false)}>
+              Закрыть
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Настройки CRM системы</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6 pt-4">
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Общие настройки</h3>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="company-name">Название компании</Label>
+                  <Input 
+                    id="company-name" 
+                    placeholder="Моя компания" 
+                    className="mt-1"
+                    defaultValue="Интернет-магазин"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="email">Email для уведомлений</Label>
+                  <Input 
+                    id="email" 
+                    type="email"
+                    placeholder="email@example.com" 
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="currency">Валюта</Label>
+                  <Input 
+                    id="currency" 
+                    placeholder="RUB" 
+                    className="mt-1"
+                    defaultValue="RUB"
+                    disabled
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t">
+              <h3 className="text-lg font-semibold mb-4">Уведомления</h3>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                  <span className="text-sm">Уведомлять о новых заказах</span>
+                  <input type="checkbox" className="h-4 w-4" defaultChecked />
+                </label>
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                  <span className="text-sm">Уведомлять о низких остатках</span>
+                  <input type="checkbox" className="h-4 w-4" defaultChecked />
+                </label>
+                <label className="flex items-center justify-between p-3 bg-muted/30 rounded cursor-pointer hover:bg-muted/50">
+                  <span className="text-sm">Отчеты по email</span>
+                  <input type="checkbox" className="h-4 w-4" />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <Button className="flex-1" onClick={() => {
+                toast({
+                  title: 'Настройки сохранены',
+                  description: 'Ваши настройки успешно обновлены'
+                });
+                setSettingsOpen(false);
+              }}>
+                <Icon name="Save" className="mr-2 h-4 w-4" />
+                Сохранить
+              </Button>
+              <Button variant="outline" onClick={() => setSettingsOpen(false)}>
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

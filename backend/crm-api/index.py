@@ -28,6 +28,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         elif action == 'connectMarketplace' and method == 'POST':
             body_data = json.loads(event.get('body', '{}'))
             return connect_marketplace(body_data)
+        elif action == 'disconnectMarketplace' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return disconnect_marketplace(body_data)
         elif action == 'getProducts':
             marketplace = query_params.get('marketplace')
             return get_products(marketplace)
@@ -173,6 +176,38 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
         'marketplace': dict(marketplace_info),
         'message': f'{name.title()} connected',
         'success': True
+    })
+
+
+def disconnect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Отключение маркетплейса"""
+    marketplace_id = data.get('marketplaceId')
+    
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    user_id = 1
+    
+    cur.execute("""
+        DELETE FROM user_marketplace_integrations
+        WHERE user_id = %s AND marketplace_id = %s
+        RETURNING marketplace_id
+    """, (user_id, marketplace_id))
+    
+    deleted = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    if not deleted:
+        return error_response('Integration not found', 404)
+    
+    return success_response({
+        'success': True,
+        'message': 'Marketplace disconnected'
     })
 
 

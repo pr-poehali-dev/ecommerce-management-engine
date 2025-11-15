@@ -63,7 +63,9 @@ const MarketplacesPanel: React.FC = () => {
   const [connecting, setConnecting] = useState(false);
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([]);
   const [connectDialog, setConnectDialog] = useState(false);
+  const [settingsDialog, setSettingsDialog] = useState(false);
   const [selectedMarketplace, setSelectedMarketplace] = useState<string>('');
+  const [selectedMarketplaceData, setSelectedMarketplaceData] = useState<Marketplace | null>(null);
   const [credentials, setCredentials] = useState({
     apiKey: '',
     clientId: '',
@@ -202,6 +204,38 @@ const MarketplacesPanel: React.FC = () => {
         variant: 'destructive'
       });
     }
+  };
+
+  const handleDisconnect = async (marketplace: Marketplace) => {
+    try {
+      const response = await fetch(`${CRM_API}/?action=disconnectMarketplace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketplaceId: marketplace.id })
+      });
+
+      if (response.ok) {
+        toast({
+          title: '✅ Отключено',
+          description: `${marketplaceInfo[marketplace.slug || marketplace.name]?.displayName || marketplace.name} отключен`
+        });
+        setSettingsDialog(false);
+        await loadMarketplaces();
+      } else {
+        throw new Error('Failed to disconnect');
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось отключить маркетплейс',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const openSettingsDialog = (marketplace: Marketplace) => {
+    setSelectedMarketplaceData(marketplace);
+    setSettingsDialog(true);
   };
 
   if (loading) {
@@ -346,6 +380,76 @@ const MarketplacesPanel: React.FC = () => {
             </div>
           </DialogContent>
         </Dialog>
+
+        <Dialog open={settingsDialog} onOpenChange={setSettingsDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-2xl">Настройки маркетплейса</DialogTitle>
+            </DialogHeader>
+            {selectedMarketplaceData && (
+              <div className="space-y-6 pt-4">
+                <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg">
+                  <div className="text-5xl">
+                    {marketplaceInfo[selectedMarketplaceData.slug || selectedMarketplaceData.name]?.logo || '📦'}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-xl font-semibold">
+                      {marketplaceInfo[selectedMarketplaceData.slug || selectedMarketplaceData.name]?.displayName || selectedMarketplaceData.name}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {selectedMarketplaceData.is_connected ? 'Подключен и активен' : 'Не подключен'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded">
+                    <span className="text-sm text-muted-foreground">Client ID</span>
+                    <span className="text-sm font-mono">{selectedMarketplaceData.client_id || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded">
+                    <span className="text-sm text-muted-foreground">API Key</span>
+                    <span className="text-sm font-mono">
+                      {selectedMarketplaceData.api_key ? '••••••••' + selectedMarketplaceData.api_key.slice(-4) : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-muted/30 rounded">
+                    <span className="text-sm text-muted-foreground">Последняя синхронизация</span>
+                    <span className="text-sm">
+                      {selectedMarketplaceData.last_sync_at 
+                        ? new Date(selectedMarketplaceData.last_sync_at).toLocaleString('ru-RU')
+                        : 'Не синхронизировано'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedMarketplaceData.is_connected && (
+                  <div className="space-y-3 pt-4 border-t">
+                    <Button 
+                      variant="outline" 
+                      className="w-full"
+                      onClick={() => {
+                        handleSync(selectedMarketplaceData.id, selectedMarketplaceData.slug || selectedMarketplaceData.name);
+                        setSettingsDialog(false);
+                      }}
+                    >
+                      <Icon name="RefreshCw" className="mr-2 h-4 w-4" />
+                      Синхронизировать сейчас
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      className="w-full"
+                      onClick={() => handleDisconnect(selectedMarketplaceData)}
+                    >
+                      <Icon name="Unlink" className="mr-2 h-4 w-4" />
+                      Отключить маркетплейс
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
 
       {marketplaces.length === 0 ? (
@@ -392,7 +496,11 @@ const MarketplacesPanel: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                <Button variant="ghost" size="sm">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => openSettingsDialog(marketplace)}
+                >
                   <Icon name="Settings" className="h-4 w-4" />
                 </Button>
               </div>
