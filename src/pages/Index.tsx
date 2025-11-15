@@ -1,650 +1,793 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Separator } from '@/components/ui/separator';
-import Icon from '@/components/ui/icon';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import Icon from '@/components/ui/icon';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { exportProductsToExcel, exportOrdersToExcel, exportCustomersToExcel, exportFullReport } from '@/lib/excel-export';
 
 const API_URL = 'https://functions.poehali.dev/26680cc3-0053-45ae-ac6a-1c7a3c94505c';
 
+interface IndexProps {
+  onLogout: () => void;
+}
+
 interface Product {
-  id: number;
+  id: string;
   name: string;
-  description?: string;
-  price: number;
+  description: string;
   category: string;
+  price: number;
   stock: number;
-  image: string;
+  image?: string;
 }
 
 interface Order {
   id: string;
-  customerName?: string;
-  customerEmail?: string;
+  customerName: string;
+  customerEmail: string;
+  marketplace: string;
   date: string;
-  status: 'delivered' | 'processing' | 'shipped';
-  total: number;
+  status: 'processing' | 'shipped' | 'delivered';
   items: number;
-  address?: string;
+  total: number;
 }
 
 interface Customer {
-  id: number;
+  id: string;
   name: string;
   email: string;
-  phone?: string;
-  avatar?: string;
-  totalSpent: number;
-  totalOrders: number;
+  phone: string;
   status: string;
+  totalOrders: number;
+  totalSpent: number;
   joinedDate: string;
 }
 
-interface ChartData {
-  date: string;
-  revenue: number;
-  orders: number;
-  customers: number;
+interface Marketplace {
+  id: string;
+  name: string;
+  logo: string;
+  country: string;
+  connected: boolean;
 }
 
-const Index = () => {
+interface Analytics {
+  revenue: number;
+  orders: number;
+  products: number;
+  customers: number;
+  revenueData: Array<{ name: string; revenue: number }>;
+  ordersData: Array<{ name: string; orders: number; customers: number }>;
+}
+
+const Index: React.FC<IndexProps> = ({ onLogout }) => {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [loading, setLoading] = useState(false);
+
+  // Products state
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [productDialog, setProductDialog] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productForm, setProductForm] = useState({ name: '', description: '', category: '', price: 0, stock: 0 });
+
+  // Orders state
   const [orders, setOrders] = useState<Order[]>([]);
+  const [orderStatus, setOrderStatus] = useState<string>('all');
+
+  // Customers state
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [chartData, setChartData] = useState<ChartData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
+
+  // Marketplaces state
+  const [marketplaces, setMarketplaces] = useState<Marketplace[]>([]);
+
+  // Analytics state
+  const [analytics, setAnalytics] = useState<Analytics>({
     revenue: 0,
     orders: 0,
     products: 0,
     customers: 0,
+    revenueData: [],
+    ordersData: []
   });
-  const { toast } = useToast();
 
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    description: '',
-    price: '',
-    category: '',
-    stock: '',
-  });
+  // User info
+  const [userInfo, setUserInfo] = useState({ email: '', name: '' });
 
   useEffect(() => {
-    loadData();
+    const email = localStorage.getItem('userEmail') || '';
+    const name = localStorage.getItem('userName') || email.split('@')[0];
+    setUserInfo({ email, name });
   }, []);
 
-  const loadData = async () => {
+  // Fetch data functions
+  const fetchProducts = async (category: string = 'all') => {
     setLoading(true);
     try {
-      const [productsRes, ordersRes, customersRes, analyticsRes] = await Promise.all([
-        fetch(`${API_URL}?path=products`),
-        fetch(`${API_URL}?path=orders`),
-        fetch(`${API_URL}?path=customers`),
-        fetch(`${API_URL}?path=analytics`),
-      ]);
-
-      const productsData = await productsRes.json();
-      const ordersData = await ordersRes.json();
-      const customersData = await customersRes.json();
-      const analyticsData = await analyticsRes.json();
-
-      setProducts(productsData.products || []);
-      setOrders(ordersData.orders || []);
-      setCustomers(customersData.customers || []);
-      setStats(analyticsData.stats || stats);
-      setChartData(analyticsData.chartData || []);
+      const url = category === 'all' 
+        ? `${API_URL}?path=products`
+        : `${API_URL}?path=products&category=${encodeURIComponent(category)}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      setProducts(data.products || []);
+      if (data.categories) setCategories(data.categories);
     } catch (error) {
-      toast({
-        title: 'Ошибка загрузки данных',
-        description: 'Не удалось загрузить данные с сервера',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: 'Failed to load products', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchOrders = async (status: string = 'all') => {
+    setLoading(true);
+    try {
+      const url = status === 'all'
+        ? `${API_URL}?path=orders`
+        : `${API_URL}?path=orders&status=${status}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      setOrders(data.orders || []);
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load orders', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}?path=customers`);
+      const data = await response.json();
+      setCustomers(data.customers || []);
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load customers', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMarketplaces = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}?path=marketplaces`);
+      const data = await response.json();
+      setMarketplaces(data.marketplaces || []);
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load marketplaces', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}?path=analytics`);
+      const data = await response.json();
+      setAnalytics(data);
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load analytics', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'products') fetchProducts(selectedCategory);
+    if (activeTab === 'orders') fetchOrders(orderStatus);
+    if (activeTab === 'customers') fetchCustomers();
+    if (activeTab === 'marketplaces') fetchMarketplaces();
+    if (activeTab === 'dashboard') fetchAnalytics();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'products') fetchProducts(selectedCategory);
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    if (activeTab === 'orders') fetchOrders(orderStatus);
+  }, [orderStatus]);
+
+  // Product CRUD operations
   const handleAddProduct = async () => {
     try {
       const response = await fetch(`${API_URL}?path=products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProduct.name,
-          description: newProduct.description,
-          price: parseFloat(newProduct.price),
-          category: newProduct.category,
-          stock: parseInt(newProduct.stock),
-        }),
+        body: JSON.stringify(productForm)
       });
-
       if (response.ok) {
-        toast({
-          title: 'Товар добавлен',
-          description: 'Товар успешно добавлен в каталог',
-        });
-        setNewProduct({ name: '', description: '', price: '', category: '', stock: '' });
-        loadData();
+        toast({ title: 'Success', description: 'Product added successfully' });
+        setProductDialog(false);
+        setProductForm({ name: '', description: '', category: '', price: 0, stock: 0 });
+        fetchProducts(selectedCategory);
       }
     } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось добавить товар',
-        variant: 'destructive',
+      toast({ title: 'Error', description: 'Failed to add product', variant: 'destructive' });
+    }
+  };
+
+  const handleUpdateProduct = async () => {
+    try {
+      const response = await fetch(`${API_URL}?path=products`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...productForm, id: editingProduct?.id })
       });
+      if (response.ok) {
+        toast({ title: 'Success', description: 'Product updated successfully' });
+        setProductDialog(false);
+        setEditingProduct(null);
+        setProductForm({ name: '', description: '', category: '', price: 0, stock: 0 });
+        fetchProducts(selectedCategory);
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to update product', variant: 'destructive' });
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'delivered': return 'bg-green-500/10 text-green-700 border-green-200';
-      case 'processing': return 'bg-yellow-500/10 text-yellow-700 border-yellow-200';
-      case 'shipped': return 'bg-blue-500/10 text-blue-700 border-blue-200';
-      default: return 'bg-gray-500/10 text-gray-700 border-gray-200';
+  const handleDeleteProduct = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this product?')) return;
+    try {
+      const response = await fetch(`${API_URL}?path=products&id=${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        toast({ title: 'Success', description: 'Product deleted successfully' });
+        fetchProducts(selectedCategory);
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to delete product', variant: 'destructive' });
     }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'delivered': return 'Доставлен';
-      case 'processing': return 'Обработка';
-      case 'shipped': return 'Отправлен';
-      default: return status;
-    }
+  const openEditDialog = (product: Product) => {
+    setEditingProduct(product);
+    setProductForm({
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      price: product.price,
+      stock: product.stock
+    });
+    setProductDialog(true);
   };
+
+  const handleConnectMarketplace = (marketplaceName: string) => {
+    toast({ title: 'Info', description: `Connecting to ${marketplaceName}...` });
+  };
+
+  // Render functions for each tab
+  const renderDashboard = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Dashboard</h2>
+        <Button onClick={() => exportFullReport(products, orders, customers, analytics)}>
+          <Icon name="FileDown" className="mr-2 h-4 w-4" />
+          Export Full Report
+        </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+            <Icon name="DollarSign" className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{analytics.revenue.toLocaleString('ru-RU')} ₽</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Orders</CardTitle>
+            <Icon name="ShoppingCart" className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{analytics.orders}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Products</CardTitle>
+            <Icon name="Package" className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{analytics.products}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Customers</CardTitle>
+            <Icon name="Users" className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{analytics.customers}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Revenue Overview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={analytics.revenueData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="revenue" stroke="#8884d8" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Orders & Customers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={analytics.ordersData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="orders" fill="#8884d8" />
+                <Bar dataKey="customers" fill="#82ca9d" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Orders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order ID</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders.slice(0, 5).map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell className="font-medium">{order.id}</TableCell>
+                  <TableCell>{order.customerName}</TableCell>
+                  <TableCell>{order.date}</TableCell>
+                  <TableCell>
+                    <Badge variant={order.status === 'delivered' ? 'default' : 'secondary'}>
+                      {order.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{order.total.toLocaleString('ru-RU')} ₽</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderProducts = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Products</h2>
+        <div className="flex gap-2">
+          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map(cat => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={() => exportProductsToExcel(products)}>
+            <Icon name="FileDown" className="mr-2 h-4 w-4" />
+            Export
+          </Button>
+          <Button onClick={() => { setEditingProduct(null); setProductForm({ name: '', description: '', category: '', price: 0, stock: 0 }); setProductDialog(true); }}>
+            <Icon name="Plus" className="mr-2 h-4 w-4" />
+            Add Product
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
+          {loading ? (
+            <div className="text-center py-8">Loading...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {products.map((product) => (
+                  <TableRow key={product.id}>
+                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell>{product.category}</TableCell>
+                    <TableCell>{product.price.toLocaleString('ru-RU')} ₽</TableCell>
+                    <TableCell>{product.stock}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => openEditDialog(product)}>
+                          <Icon name="Pencil" className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteProduct(product.id)}>
+                          <Icon name="Trash2" className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderOrders = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Orders</h2>
+        <Button variant="outline" onClick={() => exportOrdersToExcel(orders)}>
+          <Icon name="FileDown" className="mr-2 h-4 w-4" />
+          Export
+        </Button>
+      </div>
+
+      <div className="flex gap-2">
+        {['all', 'processing', 'shipped', 'delivered'].map((status) => (
+          <Button
+            key={status}
+            variant={orderStatus === status ? 'default' : 'outline'}
+            onClick={() => setOrderStatus(status)}
+          >
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+          </Button>
+        ))}
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
+          {loading ? (
+            <div className="text-center py-8">Loading...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order ID</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Marketplace</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orders.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-medium">{order.id}</TableCell>
+                    <TableCell>{order.customerName}</TableCell>
+                    <TableCell>{order.marketplace}</TableCell>
+                    <TableCell>{order.date}</TableCell>
+                    <TableCell>
+                      <Badge 
+                        variant={
+                          order.status === 'delivered' ? 'default' : 
+                          order.status === 'shipped' ? 'secondary' : 
+                          'outline'
+                        }
+                      >
+                        {order.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{order.items}</TableCell>
+                    <TableCell>{order.total.toLocaleString('ru-RU')} ₽</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderCustomers = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Customers</h2>
+        <Button variant="outline" onClick={() => exportCustomersToExcel(customers)}>
+          <Icon name="FileDown" className="mr-2 h-4 w-4" />
+          Export
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
+          {loading ? (
+            <div className="text-center py-8">Loading...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Orders</TableHead>
+                  <TableHead>Total Spent</TableHead>
+                  <TableHead>Joined</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {customers.map((customer) => (
+                  <TableRow key={customer.id}>
+                    <TableCell className="font-medium">{customer.name}</TableCell>
+                    <TableCell>{customer.email}</TableCell>
+                    <TableCell>{customer.phone}</TableCell>
+                    <TableCell>
+                      <Badge variant={customer.status === 'premium' ? 'default' : 'secondary'}>
+                        {customer.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{customer.totalOrders}</TableCell>
+                    <TableCell>{customer.totalSpent.toLocaleString('ru-RU')} ₽</TableCell>
+                    <TableCell>{customer.joinedDate}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderMarketplaces = () => (
+    <div className="space-y-6">
+      <h2 className="text-3xl font-bold">Marketplaces</h2>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {loading ? (
+          <div className="col-span-full text-center py-8">Loading...</div>
+        ) : (
+          marketplaces.map((marketplace) => (
+            <Card key={marketplace.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">
+                      <Icon name="Store" className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">{marketplace.name}</CardTitle>
+                      <CardDescription>{marketplace.country}</CardDescription>
+                    </div>
+                  </div>
+                  <Badge variant={marketplace.connected ? 'default' : 'outline'}>
+                    {marketplace.connected ? 'Connected' : 'Not Connected'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Button 
+                  className="w-full" 
+                  variant={marketplace.connected ? 'outline' : 'default'}
+                  onClick={() => handleConnectMarketplace(marketplace.name)}
+                >
+                  <Icon name={marketplace.connected ? 'Settings' : 'Link'} className="mr-2 h-4 w-4" />
+                  {marketplace.connected ? 'Manage' : 'Connect'}
+                </Button>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderProfile = () => (
+    <div className="space-y-6">
+      <h2 className="text-3xl font-bold">Profile</h2>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>User Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label>Name</Label>
+              <p className="text-lg font-medium">{userInfo.name}</p>
+            </div>
+            <div>
+              <Label>Email</Label>
+              <p className="text-lg font-medium">{userInfo.email}</p>
+            </div>
+            <Button variant="destructive" onClick={onLogout} className="w-full mt-4">
+              <Icon name="LogOut" className="mr-2 h-4 w-4" />
+              Logout
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Stats</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total Products:</span>
+              <span className="font-semibold">{analytics.products}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total Orders:</span>
+              <span className="font-semibold">{analytics.orders}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total Customers:</span>
+              <span className="font-semibold">{analytics.customers}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total Revenue:</span>
+              <span className="font-semibold">{analytics.revenue.toLocaleString('ru-RU')} ₽</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-background">
-      <div className="flex">
-        <aside className="w-64 min-h-screen bg-sidebar border-r border-sidebar-border">
-          <div className="p-6">
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 rounded-xl bg-sidebar-primary flex items-center justify-center">
-                <Icon name="Store" className="text-sidebar-primary-foreground" size={24} />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-sidebar-foreground">ShopAdmin</h1>
-                <p className="text-xs text-sidebar-foreground/60">E-commerce движок</p>
-              </div>
-            </div>
-
-            <nav className="space-y-1">
-              {[
-                { id: 'dashboard', icon: 'LayoutDashboard', label: 'Дашборд' },
-                { id: 'products', icon: 'Package', label: 'Товары' },
-                { id: 'orders', icon: 'ShoppingCart', label: 'Заказы' },
-                { id: 'customers', icon: 'Users', label: 'Клиенты' },
-                { id: 'profile', icon: 'User', label: 'Профиль' },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                    activeTab === item.id
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
-                      : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
-                  }`}
-                >
-                  <Icon name={item.icon} size={20} />
-                  <span className="font-medium">{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-        </aside>
-
-        <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto animate-fade-in">
-            {activeTab === 'dashboard' && (
-              <div className="space-y-8">
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">Добро пожаловать!</h2>
-                  <p className="text-muted-foreground">Вот что происходит в вашем магазине сегодня</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {[
-                    { label: 'Выручка', value: `${(stats.revenue / 1000).toFixed(0)}K ₽`, icon: 'TrendingUp', color: 'text-green-600', bg: 'bg-green-500/10' },
-                    { label: 'Заказы', value: stats.orders, icon: 'ShoppingCart', color: 'text-blue-600', bg: 'bg-blue-500/10' },
-                    { label: 'Товары', value: stats.products, icon: 'Package', color: 'text-purple-600', bg: 'bg-purple-500/10' },
-                    { label: 'Клиенты', value: stats.customers, icon: 'Users', color: 'text-orange-600', bg: 'bg-orange-500/10' },
-                  ].map((stat, idx) => (
-                    <Card key={idx} className="hover-scale cursor-pointer border-2">
-                      <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                          {stat.label}
-                        </CardTitle>
-                        <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center`}>
-                          <Icon name={stat.icon} className={stat.color} size={20} />
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-3xl font-bold">{stat.value}</div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-
-                <div className="grid lg:grid-cols-2 gap-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Icon name="TrendingUp" size={20} />
-                        Аналитика продаж
-                      </CardTitle>
-                      <CardDescription>Динамика выручки за неделю</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                          <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
-                          <YAxis stroke="#6b7280" fontSize={12} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-                          />
-                          <Line type="monotone" dataKey="revenue" stroke="#6E59A5" strokeWidth={3} dot={{ fill: '#6E59A5' }} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Icon name="BarChart3" size={20} />
-                        Заказы и клиенты
-                      </CardTitle>
-                      <CardDescription>Новые заказы и клиенты</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <BarChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                          <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
-                          <YAxis stroke="#6b7280" fontSize={12} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-                          />
-                          <Legend />
-                          <Bar dataKey="orders" fill="#0EA5E9" radius={[8, 8, 0, 0]} name="Заказы" />
-                          <Bar dataKey="customers" fill="#6E59A5" radius={[8, 8, 0, 0]} name="Клиенты" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Icon name="Clock" size={20} />
-                      Последние заказы
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {orders.slice(0, 5).map((order) => (
-                        <div key={order.id} className="flex items-center justify-between border-b pb-4 last:border-0">
-                          <div>
-                            <p className="font-medium">{order.id}</p>
-                            <p className="text-sm text-muted-foreground">{order.customerName || 'Клиент'} • {order.date}</p>
-                          </div>
-                          <div className="text-right flex items-center gap-3">
-                            <div>
-                              <p className="font-semibold">{order.total} ₽</p>
-                              <p className="text-sm text-muted-foreground">{order.items} товара</p>
-                            </div>
-                            <Badge variant="outline" className={getStatusColor(order.status)}>
-                              {getStatusText(order.status)}
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
-            {activeTab === 'products' && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-3xl font-bold mb-2">Управление товарами</h2>
-                    <p className="text-muted-foreground">Добавляйте, редактируйте и отслеживайте товары</p>
-                  </div>
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button size="lg" className="gap-2">
-                        <Icon name="Plus" size={20} />
-                        Добавить товар
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Новый товар</DialogTitle>
-                        <DialogDescription>Заполните информацию о товаре</DialogDescription>
-                      </DialogHeader>
-                      <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="name">Название</Label>
-                          <Input 
-                            id="name" 
-                            placeholder="Введите название товара" 
-                            value={newProduct.name}
-                            onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="grid gap-2">
-                            <Label htmlFor="price">Цена (₽)</Label>
-                            <Input 
-                              id="price" 
-                              type="number" 
-                              placeholder="0" 
-                              value={newProduct.price}
-                              onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
-                            />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="stock">Количество</Label>
-                            <Input 
-                              id="stock" 
-                              type="number" 
-                              placeholder="0" 
-                              value={newProduct.stock}
-                              onChange={(e) => setNewProduct({...newProduct, stock: e.target.value})}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="category">Категория</Label>
-                          <Input 
-                            id="category" 
-                            placeholder="Электроника, Одежда..." 
-                            value={newProduct.category}
-                            onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="description">Описание</Label>
-                          <Textarea 
-                            id="description" 
-                            placeholder="Описание товара" 
-                            rows={4}
-                            value={newProduct.description}
-                            onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
-                          />
-                        </div>
-                        <Button onClick={handleAddProduct}>Создать товар</Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-
-                <Card>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Товар</TableHead>
-                          <TableHead>Категория</TableHead>
-                          <TableHead>Цена</TableHead>
-                          <TableHead>Остаток</TableHead>
-                          <TableHead className="text-right">Действия</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {products.map((product) => (
-                          <TableRow key={product.id}>
-                            <TableCell>
-                              <div className="flex items-center gap-3">
-                                <img src={product.image} alt={product.name} className="w-10 h-10 rounded-lg object-cover" />
-                                <div>
-                                  <p className="font-medium">{product.name}</p>
-                                  {product.description && (
-                                    <p className="text-xs text-muted-foreground">{product.description.substring(0, 50)}...</p>
-                                  )}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>{product.category}</TableCell>
-                            <TableCell className="font-semibold">{product.price} ₽</TableCell>
-                            <TableCell>
-                              <Badge variant={product.stock < 30 ? 'destructive' : 'secondary'}>
-                                {product.stock} шт
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button variant="ghost" size="icon">
-                                  <Icon name="Pencil" size={16} />
-                                </Button>
-                                <Button variant="ghost" size="icon">
-                                  <Icon name="Trash2" size={16} />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
-            {activeTab === 'orders' && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">Управление заказами</h2>
-                  <p className="text-muted-foreground">Отслеживайте статусы и обрабатывайте заказы</p>
-                </div>
-
-                <Card>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Номер заказа</TableHead>
-                          <TableHead>Клиент</TableHead>
-                          <TableHead>Дата</TableHead>
-                          <TableHead>Статус</TableHead>
-                          <TableHead>Сумма</TableHead>
-                          <TableHead className="text-right">Действия</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map((order) => (
-                          <TableRow key={order.id}>
-                            <TableCell className="font-medium">{order.id}</TableCell>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{order.customerName || 'Клиент'}</p>
-                                <p className="text-xs text-muted-foreground">{order.customerEmail || ''}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell>{order.date}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={getStatusColor(order.status)}>
-                                {getStatusText(order.status)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="font-semibold">{order.total} ₽</TableCell>
-                            <TableCell className="text-right">
-                              <Button variant="ghost" size="sm" className="gap-2">
-                                Детали
-                                <Icon name="ChevronRight" size={16} />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
-            {activeTab === 'customers' && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">CRM - Управление клиентами</h2>
-                  <p className="text-muted-foreground">База клиентов и история их покупок</p>
-                </div>
-
-                <div className="grid gap-4">
-                  {customers.map((customer) => (
-                    <Card key={customer.id} className="hover-scale">
-                      <CardContent className="p-6">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-4">
-                            <Avatar className="w-16 h-16">
-                              <AvatarImage src={customer.avatar || '/placeholder.svg'} />
-                              <AvatarFallback className="bg-primary text-primary-foreground text-lg">
-                                {customer.name.split(' ').map(n => n[0]).join('')}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="text-xl font-bold">{customer.name}</h3>
-                                <Badge variant={customer.status === 'premium' ? 'default' : 'secondary'} className="gap-1">
-                                  {customer.status === 'premium' && <Icon name="Star" size={12} />}
-                                  {customer.status === 'premium' ? 'Премиум' : 'Активный'}
-                                </Badge>
-                              </div>
-                              <p className="text-sm text-muted-foreground mb-2">{customer.email}</p>
-                              {customer.phone && (
-                                <p className="text-sm text-muted-foreground">{customer.phone}</p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-2xl font-bold text-green-600">{customer.totalSpent.toLocaleString()} ₽</p>
-                            <p className="text-sm text-muted-foreground">{customer.totalOrders} заказов</p>
-                            <p className="text-xs text-muted-foreground mt-1">С {customer.joinedDate}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'profile' && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">Личный кабинет</h2>
-                  <p className="text-muted-foreground">Управляйте своим профилем и заказами</p>
-                </div>
-
-                <div className="grid lg:grid-cols-3 gap-6">
-                  <Card className="lg:col-span-1">
-                    <CardHeader>
-                      <CardTitle>Профиль</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      <div className="flex flex-col items-center text-center">
-                        <Avatar className="w-24 h-24 mb-4">
-                          <AvatarImage src="/placeholder.svg" />
-                          <AvatarFallback className="bg-primary text-primary-foreground text-2xl">АИ</AvatarFallback>
-                        </Avatar>
-                        <h3 className="text-xl font-bold">Александр Иванов</h3>
-                        <p className="text-sm text-muted-foreground mb-4">alex@example.com</p>
-                        <Badge variant="secondary" className="gap-1">
-                          <Icon name="Star" size={14} />
-                          Премиум клиент
-                        </Badge>
-                      </div>
-                      <Separator />
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Заказов всего</span>
-                          <span className="font-semibold">23</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">На сумму</span>
-                          <span className="font-semibold">234 890 ₽</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Кэшбэк</span>
-                          <span className="font-semibold text-green-600">2 348 ₽</span>
-                        </div>
-                      </div>
-                      <Button variant="outline" className="w-full gap-2">
-                        <Icon name="Settings" size={16} />
-                        Настройки
-                      </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="lg:col-span-2">
-                    <CardHeader>
-                      <CardTitle>Мои заказы</CardTitle>
-                      <CardDescription>История ваших покупок</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {orders.slice(0, 3).map((order) => (
-                          <div key={order.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                            <div className="flex items-start justify-between mb-3">
-                              <div>
-                                <p className="font-semibold text-lg">{order.id}</p>
-                                <p className="text-sm text-muted-foreground">{order.date}</p>
-                              </div>
-                              <Badge variant="outline" className={getStatusColor(order.status)}>
-                                {getStatusText(order.status)}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <Icon name="Package" size={14} />
-                                  {order.items} товар(а)
-                                </span>
-                                <span className="font-semibold text-foreground">{order.total} ₽</span>
-                              </div>
-                              <Button variant="ghost" size="sm" className="gap-2">
-                                Детали
-                                <Icon name="ChevronRight" size={16} />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            )}
-          </div>
-        </main>
+    <div className="flex h-screen bg-gray-50">
+      {/* Sidebar */}
+      <div className="w-64 bg-white border-r">
+        <div className="p-6">
+          <h1 className="text-2xl font-bold">E-Commerce</h1>
+        </div>
+        <nav className="space-y-1 px-3">
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
+            { id: 'products', label: 'Products', icon: 'Package' },
+            { id: 'orders', label: 'Orders', icon: 'ShoppingCart' },
+            { id: 'customers', label: 'Customers', icon: 'Users' },
+            { id: 'marketplaces', label: 'Marketplaces', icon: 'Store' },
+            { id: 'profile', label: 'Profile', icon: 'User' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-gray-100'
+              }`}
+            >
+              <Icon name={tab.icon} className="h-5 w-5" />
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </nav>
       </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-auto">
+        <div className="p-8">
+          {activeTab === 'dashboard' && renderDashboard()}
+          {activeTab === 'products' && renderProducts()}
+          {activeTab === 'orders' && renderOrders()}
+          {activeTab === 'customers' && renderCustomers()}
+          {activeTab === 'marketplaces' && renderMarketplaces()}
+          {activeTab === 'profile' && renderProfile()}
+        </div>
+      </div>
+
+      {/* Product Dialog */}
+      <Dialog open={productDialog} onOpenChange={setProductDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingProduct ? 'Edit Product' : 'Add Product'}</DialogTitle>
+            <DialogDescription>
+              {editingProduct ? 'Update product information' : 'Create a new product'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                value={productForm.name}
+                onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={productForm.description}
+                onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="category">Category</Label>
+              <Select value={productForm.category} onValueChange={(value) => setProductForm({ ...productForm, category: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map(cat => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="price">Price</Label>
+              <Input
+                id="price"
+                type="number"
+                value={productForm.price}
+                onChange={(e) => setProductForm({ ...productForm, price: parseFloat(e.target.value) })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="stock">Stock</Label>
+              <Input
+                id="stock"
+                type="number"
+                value={productForm.stock}
+                onChange={(e) => setProductForm({ ...productForm, stock: parseInt(e.target.value) })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProductDialog(false)}>Cancel</Button>
+            <Button onClick={editingProduct ? handleUpdateProduct : handleAddProduct}>
+              {editingProduct ? 'Update' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
