@@ -1,0 +1,37 @@
+{
+  "tests": [
+    {
+      "name": "Sales forecast",
+      "method": "GET",
+      "path": "/?action=salesForecast&productId=1&days=7",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "productId": "string",
+        "forecast": "array"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Returns prediction",
+      "method": "GET",
+      "path": "/?action=returnsPrediction&productId=1",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "productId": "string",
+        "returnProbability": "number"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Anomaly detection",
+      "method": "GET",
+      "path": "/?action=anomalyDetection&marketplaceId=1",
+      "expectedStatus": 200,
+      "expectedBody": {
+        "marketplaceId": "string",
+        "anomalies": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

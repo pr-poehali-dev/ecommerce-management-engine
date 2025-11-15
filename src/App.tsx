@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import CRMDashboard from "./pages/CRMDashboard";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,14 @@ const App = () => {
                       setIsAuthenticated(false);
                       localStorage.removeItem('user');
                     }} /> : 
+                    <Navigate to="/login" replace />
+                  } 
+                />
+                <Route 
+                  path="/crm" 
+                  element={
+                    isAuthenticated ? 
+                    <CRMDashboard /> : 
                     <Navigate to="/login" replace />
                   } 
                 />

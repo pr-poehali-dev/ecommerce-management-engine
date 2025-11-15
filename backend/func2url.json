@@ -1,5 +1,6 @@
 {
-  "marketplace-sync": "https://functions.poehali.dev/fd20e79f-008e-45c3-b1f3-525acbe9e95b",
-  "webstore": "https://functions.poehali.dev/a088ac42-044b-465b-9291-e546fa248863",
+  "crm-api": "https://functions.poehali.dev/c04a2bd5-728d-4b71-866a-189e7a5acb5c",
+  "auth": "https://functions.poehali.dev/a081dfbf-a5de-44db-b7f5-c892743a5173",
+  "ml-predictions": "https://functions.poehali.dev/108ae54f-0a71-400d-8644-1b7b5aaca990",
   "api": "https://functions.poehali.dev/26680cc3-0053-45ae-ac6a-1c7a3c94505c"
 }

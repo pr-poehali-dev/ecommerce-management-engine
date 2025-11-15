@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import Icon from '@/components/ui/icon';
 import Sidebar from '@/components/dashboard/Sidebar';
 import DashboardTab from '@/components/dashboard/DashboardTab';
 import ProductsTab from '@/components/dashboard/ProductsTab';
@@ -70,6 +73,7 @@ interface Analytics {
 }
 
 const Index: React.FC<IndexProps> = ({ onLogout }) => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(false);
@@ -282,6 +286,13 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
       
       <main className="flex-1 p-8">
         <div className="max-w-7xl mx-auto">
+          <div className="mb-6 flex items-center justify-between">
+            <div></div>
+            <Button onClick={() => navigate('/crm')} variant="outline" className="gap-2">
+              <Icon name="Sparkles" className="h-4 w-4" />
+              Новая CRM система
+            </Button>
+          </div>
           {activeTab === 'dashboard' && (
             <DashboardTab 
               analytics={analytics} 
