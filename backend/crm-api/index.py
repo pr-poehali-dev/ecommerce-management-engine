@@ -57,6 +57,27 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return get_analytics(period)
         elif action == 'getDashboard':
             return get_dashboard()
+        elif action == 'ozonUpdatePrice' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return ozon_update_price(body_data)
+        elif action == 'ozonUpdateStock' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return ozon_update_stock(body_data)
+        elif action == 'ozonGetFinance':
+            marketplace_id = query_params.get('marketplaceId')
+            return ozon_get_finance_data(marketplace_id)
+        elif action == 'ozonPackOrder' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return ozon_pack_order(body_data)
+        elif action == 'ozonShipOrder' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return ozon_ship_order(body_data)
+        elif action == 'ozonGetReturns':
+            marketplace_id = query_params.get('marketplaceId')
+            return ozon_get_returns(marketplace_id)
+        elif action == 'ozonAcceptReturn' and method == 'POST':
+            body_data = json.loads(event.get('body', '{}'))
+            return ozon_accept_return(body_data)
         else:
             return error_response('Invalid action', 400)
     except Exception as e:
@@ -71,11 +92,6 @@ def get_db_connection():
         raise ValueError('DATABASE_URL not set')
     conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
-    
-    cur = conn.cursor()
-    cur.execute("SET search_path TO t_p86529894_ecommerce_management")
-    cur.close()
-    
     return conn
 
 
@@ -961,3 +977,403 @@ def error_response(message: str, status_code: int = 500) -> Dict[str, Any]:
         'isBase64Encoded': False,
         'body': json.dumps({'error': message})
     }
+
+
+def ozon_update_price(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Изменение цены товара на Ozon"""
+    marketplace_id = body.get('marketplaceId')
+    offer_id = body.get('offerId')
+    price = body.get('price')
+    old_price = body.get('oldPrice')
+    
+    if not marketplace_id or not offer_id or not price:
+        return error_response('marketplaceId, offerId and price required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    prices_data = {
+        'prices': [{
+            'offer_id': offer_id,
+            'price': str(price),
+            'old_price': str(old_price) if old_price else '0',
+            'currency_code': 'RUB'
+        }]
+    }
+    
+    try:
+        result = call_ozon_api('/v1/product/import/prices', 'POST', prices_data, client_id, api_key)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'message': 'Price updated on Ozon',
+            'result': result
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_update_stock(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Обновление остатков товара на Ozon"""
+    marketplace_id = body.get('marketplaceId')
+    offer_id = body.get('offerId')
+    stock = body.get('stock')
+    warehouse_id = body.get('warehouseId')
+    
+    if not marketplace_id or not offer_id or stock is None:
+        return error_response('marketplaceId, offerId and stock required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    stocks_data = {
+        'stocks': [{
+            'offer_id': offer_id,
+            'stock': int(stock)
+        }]
+    }
+    
+    if warehouse_id:
+        stocks_data['stocks'][0]['warehouse_id'] = int(warehouse_id)
+    
+    try:
+        result = call_ozon_api('/v2/products/stocks', 'POST', stocks_data, client_id, api_key)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'message': 'Stock updated on Ozon',
+            'result': result
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_get_finance_data(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Получение финансовых данных с Ozon (комиссии, выплаты)"""
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    date_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    date_to = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    
+    try:
+        finance_data = call_ozon_api('/v3/finance/transaction/list', 'POST', {
+            'filter': {
+                'date': {
+                    'from': date_from,
+                    'to': date_to
+                },
+                'transaction_type': 'all'
+            },
+            'page': 1,
+            'page_size': 100
+        }, client_id, api_key)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'transactions': finance_data.get('result', {}).get('operations', []),
+            'period': {'from': date_from, 'to': date_to}
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_pack_order(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Упаковка заказа на Ozon"""
+    marketplace_id = body.get('marketplaceId')
+    posting_number = body.get('postingNumber')
+    
+    if not marketplace_id or not posting_number:
+        return error_response('marketplaceId and postingNumber required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    try:
+        result = call_ozon_api('/v2/posting/fbs/ship', 'POST', {
+            'posting_number': posting_number
+        }, client_id, api_key)
+        
+        posting_number_escaped = posting_number.replace("'", "''")
+        cur.execute(f"""
+            UPDATE t_p86529894_ecommerce_management.orders
+            SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+            WHERE order_number = '{posting_number_escaped}'
+        """)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'message': 'Order packed successfully',
+            'result': result
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_ship_order(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Отгрузка заказа на Ozon"""
+    marketplace_id = body.get('marketplaceId')
+    posting_number = body.get('postingNumber')
+    
+    if not marketplace_id or not posting_number:
+        return error_response('marketplaceId and postingNumber required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    try:
+        result = call_ozon_api('/v3/posting/fbs/act/create', 'POST', {
+            'containers': [{
+                'posting_number': [posting_number]
+            }]
+        }, client_id, api_key)
+        
+        posting_number_escaped = posting_number.replace("'", "''")
+        cur.execute(f"""
+            UPDATE t_p86529894_ecommerce_management.orders
+            SET status = 'shipped', shipped_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE order_number = '{posting_number_escaped}'
+        """)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'message': 'Order shipped successfully',
+            'result': result
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_get_returns(marketplace_id: Optional[str] = None) -> Dict[str, Any]:
+    """Получение списка возвратов с Ozon"""
+    if not marketplace_id:
+        return error_response('Marketplace ID required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    try:
+        returns_data = call_ozon_api('/v3/returns/company/fbs', 'POST', {
+            'filter': {
+                'status': 'All'
+            },
+            'limit': 100,
+            'offset': 0
+        }, client_id, api_key)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'returns': returns_data.get('result', [])
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)
+
+
+def ozon_accept_return(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Принятие возврата на Ozon"""
+    marketplace_id = body.get('marketplaceId')
+    return_id = body.get('returnId')
+    
+    if not marketplace_id or not return_id:
+        return error_response('marketplaceId and returnId required', 400)
+    
+    try:
+        mp_id = int(marketplace_id)
+    except ValueError:
+        return error_response('Invalid marketplace ID', 400)
+    
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute(f"""
+        SELECT umi.api_key, umi.store_id
+        FROM t_p86529894_ecommerce_management.user_marketplace_integrations umi
+        WHERE umi.marketplace_id = {mp_id} AND umi.user_id = 1
+        LIMIT 1
+    """)
+    
+    integration = cur.fetchone()
+    
+    if not integration:
+        cur.close()
+        conn.close()
+        return error_response('Marketplace not connected', 404)
+    
+    client_id = integration['store_id']
+    api_key = integration['api_key']
+    
+    try:
+        result = call_ozon_api('/v2/returns/company/fbs/accept', 'POST', {
+            'return_id': int(return_id)
+        }, client_id, api_key)
+        
+        cur.close()
+        conn.close()
+        
+        return success_response({
+            'message': 'Return accepted',
+            'result': result
+        })
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return error_response(str(e), 500)

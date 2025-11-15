@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 import { CRM_API } from './types';
+import OzonWebhookSetup from '../OzonWebhookSetup';
 
 interface MarketplaceDetailViewProps {
   marketplaceId: number;
@@ -165,6 +166,8 @@ const MarketplaceDetailView: React.FC<MarketplaceDetailViewProps> = ({
           {syncing ? 'Синхронизация...' : 'Синхронизировать'}
         </Button>
       </div>
+
+      {marketplace.slug === 'ozon' && <OzonWebhookSetup />}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-6">

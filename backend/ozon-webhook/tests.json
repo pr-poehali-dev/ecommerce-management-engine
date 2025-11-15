@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "Webhook health check",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "message_type": "TYPE_PING"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "status": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
