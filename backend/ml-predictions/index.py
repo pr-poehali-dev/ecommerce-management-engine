@@ -55,9 +55,6 @@ def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     conn = psycopg2.connect(database_url)
     conn.set_session(autocommit=True)
-    cur = conn.cursor()
-    cur.execute("SET search_path TO t_p86529894_ecommerce_management")
-    cur.close()
     return conn
 
 

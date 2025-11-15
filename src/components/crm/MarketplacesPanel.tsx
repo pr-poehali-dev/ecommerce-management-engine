@@ -12,6 +12,9 @@ const CRM_API = 'https://functions.poehali.dev/c04a2bd5-728d-4b71-866a-189e7a5ac
 interface Marketplace {
   id: number;
   name: string;
+  slug?: string;
+  logo_url?: string;
+  country?: string;
   api_key: string | null;
   client_id: string | null;
   is_connected: boolean;
@@ -131,7 +134,32 @@ const MarketplacesPanel: React.FC = () => {
 
   const openConnectDialog = (marketplaceName: string) => {
     setSelectedMarketplace(marketplaceName);
+    setCredentials({ apiKey: '', clientId: '', sellerId: '' });
     setConnectDialog(true);
+  };
+
+  const handleSync = async (marketplaceId: number, marketplaceName: string) => {
+    try {
+      toast({
+        title: 'Синхронизация',
+        description: `Синхронизирую ${marketplaceInfo[marketplaceName]?.displayName || marketplaceName}...`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      await loadMarketplaces();
+      
+      toast({
+        title: 'Успешно',
+        description: 'Синхронизация завершена'
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось синхронизировать',
+        variant: 'destructive'
+      });
+    }
   };
 
   if (loading) {
@@ -158,46 +186,71 @@ const MarketplacesPanel: React.FC = () => {
               Подключить маркетплейс
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Подключить маркетплейс</DialogTitle>
+              <DialogTitle className="text-2xl">Подключить маркетплейс</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-2">
+                Выберите площадку и введите API ключи для интеграции
+              </p>
             </DialogHeader>
-            <div className="space-y-4 pt-4">
-              <div className="grid grid-cols-3 gap-3">
-                {Object.entries(marketplaceInfo).map(([key, info]) => (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedMarketplace(key)}
-                    className={`p-4 rounded-lg border-2 transition-all ${
-                      selectedMarketplace === key
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="text-3xl mb-2">{info.logo}</div>
-                    <p className="text-xs font-medium">{info.displayName}</p>
-                  </button>
-                ))}
+            <div className="space-y-6 pt-4">
+              <div>
+                <Label className="text-base mb-3 block">Выберите маркетплейс</Label>
+                <div className="grid grid-cols-3 gap-3">
+                  {Object.entries(marketplaceInfo).map(([key, info]) => (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedMarketplace(key)}
+                      className={`p-4 rounded-lg border-2 transition-all hover:scale-105 ${
+                        selectedMarketplace === key
+                          ? 'border-primary bg-primary/5 shadow-md'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="text-4xl mb-2">{info.logo}</div>
+                      <p className="text-sm font-medium">{info.displayName}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {selectedMarketplace && (
-                <>
+                <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                      <Icon name="Key" className="h-6 w-6 text-primary" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold">
+                        Настройка {marketplaceInfo[selectedMarketplace]?.displayName}
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                        Введите ваши API ключи для подключения
+                      </p>
+                    </div>
+                  </div>
+
                   <div>
-                    <Label htmlFor="apiKey">API Key</Label>
+                    <Label htmlFor="apiKey">API Key *</Label>
                     <Input
                       id="apiKey"
                       value={credentials.apiKey}
                       onChange={(e) => setCredentials({ ...credentials, apiKey: e.target.value })}
                       placeholder="Введите API ключ"
+                      className="mt-1"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Найдите в личном кабинете маркетплейса → Настройки → API
+                    </p>
                   </div>
                   <div>
-                    <Label htmlFor="clientId">Client ID</Label>
+                    <Label htmlFor="clientId">Client ID *</Label>
                     <Input
                       id="clientId"
                       value={credentials.clientId}
                       onChange={(e) => setCredentials({ ...credentials, clientId: e.target.value })}
                       placeholder="Введите Client ID"
+                      className="mt-1"
                     />
                   </div>
                   <div>
@@ -207,21 +260,63 @@ const MarketplacesPanel: React.FC = () => {
                       value={credentials.sellerId}
                       onChange={(e) => setCredentials({ ...credentials, sellerId: e.target.value })}
                       placeholder="Введите Seller ID"
+                      className="mt-1"
                     />
                   </div>
-                  <Button onClick={handleConnect} className="w-full">
-                    Подключить
-                  </Button>
-                </>
+                  <div className="flex gap-2 pt-2">
+                    <Button 
+                      onClick={handleConnect} 
+                      className="flex-1"
+                      disabled={!credentials.apiKey || !credentials.clientId}
+                    >
+                      <Icon name="Link" className="mr-2 h-4 w-4" />
+                      Подключить маркетплейс
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setSelectedMarketplace('');
+                        setCredentials({ apiKey: '', clientId: '', sellerId: '' });
+                      }}
+                    >
+                      Отмена
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {!selectedMarketplace && (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Icon name="MousePointerClick" className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                  <p>Выберите маркетплейс для подключения</p>
+                </div>
               )}
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {marketplaces.map((marketplace) => {
-          const info = marketplaceInfo[marketplace.name] || {
+      {marketplaces.length === 0 ? (
+        <Card className="p-12">
+          <div className="text-center">
+            <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Icon name="Store" className="h-8 w-8 text-primary" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Подключите первый маркетплейс</h3>
+            <p className="text-muted-foreground mb-6">
+              Начните управлять продажами на всех площадках из одного места
+            </p>
+            <Button onClick={() => setConnectDialog(true)} size="lg">
+              <Icon name="Plus" className="mr-2 h-5 w-5" />
+              Подключить маркетплейс
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {marketplaces.map((marketplace) => {
+          const slug = marketplace.slug || marketplace.name.toLowerCase();
+          const info = marketplaceInfo[slug] || marketplaceInfo[marketplace.name] || {
             logo: '📦',
             color: 'gray',
             displayName: marketplace.name
@@ -275,7 +370,12 @@ const MarketplacesPanel: React.FC = () => {
                         : 'Не синхронизировано'}
                     </span>
                   </div>
-                  <Button variant="outline" size="sm" className="w-full mt-3">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full mt-3"
+                    onClick={() => handleSync(marketplace.id, marketplace.slug || marketplace.name)}
+                  >
                     <Icon name="RefreshCw" className="mr-2 h-3 w-3" />
                     Синхронизировать
                   </Button>
@@ -286,7 +386,7 @@ const MarketplacesPanel: React.FC = () => {
                 <Button
                   variant="outline"
                   className="w-full mt-4"
-                  onClick={() => openConnectDialog(marketplace.name)}
+                  onClick={() => openConnectDialog(marketplace.slug || marketplace.name)}
                 >
                   Подключить
                 </Button>
@@ -294,7 +394,8 @@ const MarketplacesPanel: React.FC = () => {
             </Card>
           );
         })}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

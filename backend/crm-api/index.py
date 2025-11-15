@@ -68,14 +68,23 @@ def get_marketplaces() -> Dict[str, Any]:
     
     cur.execute("""
         SELECT 
-            m.*,
+            m.id,
+            m.name,
+            m.slug,
+            m.logo_url,
+            m.country,
+            COALESCE(umi.api_key, '') as api_key,
+            COALESCE(umi.store_id, '') as client_id,
+            CASE WHEN umi.id IS NOT NULL THEN true ELSE false END as is_connected,
             COUNT(DISTINCT mp.product_id) as products_count,
             COUNT(DISTINCT o.id) as orders_count,
-            COALESCE(SUM(o.total_amount), 0) as total_revenue
+            COALESCE(SUM(o.total_amount), 0) as total_revenue,
+            umi.last_sync as last_sync_at
         FROM t_p86529894_ecommerce_management.marketplaces m
+        LEFT JOIN t_p86529894_ecommerce_management.user_marketplace_integrations umi ON m.id = umi.marketplace_id
         LEFT JOIN t_p86529894_ecommerce_management.marketplace_products mp ON m.id = mp.marketplace_id
-        LEFT JOIN orders o ON m.id = o.marketplace_id
-        GROUP BY m.id
+        LEFT JOIN t_p86529894_ecommerce_management.orders o ON m.id = o.marketplace_id
+        GROUP BY m.id, m.name, m.slug, m.logo_url, m.country, umi.id, umi.api_key, umi.store_id, umi.last_sync
         ORDER BY m.name
     """)
     
@@ -103,25 +112,49 @@ def connect_marketplace(data: Dict[str, Any]) -> Dict[str, Any]:
     cur = conn.cursor(cursor_factory=RealDictCursor)
     
     cur.execute("""
-        INSERT INTO marketplaces 
-        (name, api_key, client_id, seller_id, is_connected, last_sync_at)
-        VALUES (%s, %s, %s, %s, true, %s)
-        ON CONFLICT (id) DO UPDATE 
-        SET api_key = EXCLUDED.api_key,
-            client_id = EXCLUDED.client_id,
-            seller_id = EXCLUDED.seller_id,
-            is_connected = true,
-            last_sync_at = EXCLUDED.last_sync_at,
-            updated_at = CURRENT_TIMESTAMP
-        RETURNING *
-    """, (name, api_key, client_id, seller_id, datetime.now()))
+        SELECT id FROM t_p86529894_ecommerce_management.marketplaces
+        WHERE slug = %s OR LOWER(name) = LOWER(%s)
+        LIMIT 1
+    """, (name, name))
     
-    marketplace = cur.fetchone()
+    marketplace_result = cur.fetchone()
+    
+    if not marketplace_result:
+        cur.close()
+        conn.close()
+        return error_response(f'Marketplace {name} not found', 404)
+    
+    marketplace_id = marketplace_result['id']
+    user_id = 1
+    
+    cur.execute("""
+        SELECT id FROM t_p86529894_ecommerce_management.user_marketplace_integrations
+        WHERE user_id = %s AND marketplace_id = %s
+    """, (user_id, marketplace_id))
+    
+    existing = cur.fetchone()
+    
+    if existing:
+        cur.execute("""
+            UPDATE t_p86529894_ecommerce_management.user_marketplace_integrations
+            SET api_key = %s, api_secret = %s, store_id = %s, status = 'active', last_sync = %s
+            WHERE user_id = %s AND marketplace_id = %s
+            RETURNING *
+        """, (api_key, seller_id, client_id, datetime.now(), user_id, marketplace_id))
+    else:
+        cur.execute("""
+            INSERT INTO t_p86529894_ecommerce_management.user_marketplace_integrations 
+            (user_id, marketplace_id, api_key, api_secret, store_id, status, last_sync)
+            VALUES (%s, %s, %s, %s, %s, 'active', %s)
+            RETURNING *
+        """, (user_id, marketplace_id, api_key, seller_id, client_id, datetime.now()))
+    
+    integration = cur.fetchone()
     cur.close()
     conn.close()
     
     return success_response({
-        'marketplace': dict(marketplace),
+        'marketplace': dict(integration),
         'message': f'{name} подключен успешно'
     })
 
