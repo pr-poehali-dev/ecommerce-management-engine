@@ -10,6 +10,8 @@ export const translations = {
     analytics: 'Аналитика',
     automation: 'Автоматизация',
     aiInsights: 'AI Рекомендации',
+    aiAssistant: 'AI Помощник',
+    mobileApp: 'Мобильное приложение',
     
     // Dashboard
     totalRevenue: 'Общая выручка',
@@ -20,6 +22,8 @@ export const translations = {
     ordersAndCustomers: 'Заказы и клиенты',
     recentOrders: 'Последние заказы',
     exportFullReport: 'Экспорт отчета',
+    quickActions: 'Быстрые действия',
+    liveActivity: 'Активность в реальном времени',
     
     // Products
     addProduct: 'Добавить товар',
@@ -66,6 +70,9 @@ export const translations = {
     storeUrl: 'URL магазина',
     save: 'Сохранить',
     cancel: 'Отмена',
+    disconnect: 'Отключить',
+    syncNow: 'Синхронизировать',
+    lastSync: 'Последняя синхронизация',
     
     // AI Insights
     priceOptimization: 'Оптимизация цен',
@@ -80,6 +87,19 @@ export const translations = {
     lowStock: 'Низкий остаток',
     reorderSoon: 'Скоро нужно заказать',
     
+    // AI Assistant
+    aiConsultant: 'AI Консультант',
+    scheduleConsultation: 'Записаться на консультацию',
+    chatWithAI: 'Чат с AI',
+    aiSettings: 'Настройки AI',
+    businessPrompts: 'Бизнес-промпты',
+    consultationCalendar: 'Календарь консультаций',
+    selectDate: 'Выберите дату',
+    selectTime: 'Выберите время',
+    bookNow: 'Записаться',
+    yourMessage: 'Ваше сообщение...',
+    sendMessage: 'Отправить',
+    
     // Automation
     automationRules: 'Правила автоматизации',
     createRule: 'Создать правило',
@@ -88,9 +108,47 @@ export const translations = {
     autoMessages: 'Автоответы клиентам',
     orderSync: 'Синхронизация заказов',
     
+    // Notifications
+    notifications: 'Уведомления',
+    markAllAsRead: 'Отметить все',
+    newOrder: 'Новый заказ',
+    paymentReceived: 'Платеж получен',
+    lowStockAlert: 'Низкий остаток',
+    newCustomer: 'Новый клиент',
+    aiRecommendation: 'AI рекомендация',
+    enableNotifications: 'Включить уведомления?',
+    enableNotificationsDesc: 'Получайте мгновенные уведомления о новых заказах, платежах и важных событиях',
+    enable: 'Включить',
+    later: 'Позже',
+    
+    // Mobile App
+    mobileAppTitle: 'Мобильное приложение SellHub',
+    downloadApp: 'Скачать приложение',
+    downloadForIOS: 'Скачать для iOS',
+    downloadForAndroid: 'Скачать для Android',
+    appFeatures: 'Возможности приложения',
+    realTimeNotifications: 'Уведомления в реальном времени',
+    orderManagement: 'Управление заказами',
+    productTracking: 'Отслеживание товаров',
+    salesAnalytics: 'Аналитика продаж',
+    qrCode: 'QR-код для скачивания',
+    
     // Profile
     userInformation: 'Информация пользователя',
+    accountSettings: 'Настройки аккаунта',
+    notifications: 'Уведомления',
+    security: 'Безопасность',
+    billing: 'Платежи и подписка',
     logout: 'Выйти',
+    name: 'Имя',
+    email: 'Email',
+    phone: 'Телефон',
+    company: 'Компания',
+    timezone: 'Часовой пояс',
+    language: 'Язык',
+    theme: 'Тема',
+    lightTheme: 'Светлая',
+    darkTheme: 'Темная',
     
     // Common
     loading: 'Загрузка...',
@@ -99,6 +157,17 @@ export const translations = {
     confirmDelete: 'Вы уверены что хотите удалить?',
     update: 'Обновить',
     add: 'Добавить',
+    edit: 'Редактировать',
+    delete: 'Удалить',
+    search: 'Поиск',
+    filter: 'Фильтр',
+    sort: 'Сортировка',
+    refresh: 'Обновить',
+    close: 'Закрыть',
+    back: 'Назад',
+    next: 'Далее',
+    previous: 'Назад',
+    finish: 'Завершить',
   },
   en: {
     // Navigation
@@ -111,6 +180,8 @@ export const translations = {
     analytics: 'Analytics',
     automation: 'Automation',
     aiInsights: 'AI Insights',
+    aiAssistant: 'AI Assistant',
+    mobileApp: 'Mobile App',
     
     // Dashboard
     totalRevenue: 'Total Revenue',
@@ -121,6 +192,8 @@ export const translations = {
     ordersAndCustomers: 'Orders & Customers',
     recentOrders: 'Recent Orders',
     exportFullReport: 'Export Full Report',
+    quickActions: 'Quick Actions',
+    liveActivity: 'Live Activity',
     
     // Products
     addProduct: 'Add Product',
@@ -167,6 +240,9 @@ export const translations = {
     storeUrl: 'Store URL',
     save: 'Save',
     cancel: 'Cancel',
+    disconnect: 'Disconnect',
+    syncNow: 'Sync Now',
+    lastSync: 'Last Sync',
     
     // AI Insights
     priceOptimization: 'Price Optimization',
@@ -181,6 +257,19 @@ export const translations = {
     lowStock: 'Low Stock',
     reorderSoon: 'Reorder Soon',
     
+    // AI Assistant
+    aiConsultant: 'AI Consultant',
+    scheduleConsultation: 'Schedule Consultation',
+    chatWithAI: 'Chat with AI',
+    aiSettings: 'AI Settings',
+    businessPrompts: 'Business Prompts',
+    consultationCalendar: 'Consultation Calendar',
+    selectDate: 'Select Date',
+    selectTime: 'Select Time',
+    bookNow: 'Book Now',
+    yourMessage: 'Your message...',
+    sendMessage: 'Send Message',
+    
     // Automation
     automationRules: 'Automation Rules',
     createRule: 'Create Rule',
@@ -189,9 +278,47 @@ export const translations = {
     autoMessages: 'Auto-reply to customers',
     orderSync: 'Order synchronization',
     
+    // Notifications
+    notifications: 'Notifications',
+    markAllAsRead: 'Mark All Read',
+    newOrder: 'New Order',
+    paymentReceived: 'Payment Received',
+    lowStockAlert: 'Low Stock Alert',
+    newCustomer: 'New Customer',
+    aiRecommendation: 'AI Recommendation',
+    enableNotifications: 'Enable notifications?',
+    enableNotificationsDesc: 'Get instant notifications about new orders, payments, and important events',
+    enable: 'Enable',
+    later: 'Later',
+    
+    // Mobile App
+    mobileAppTitle: 'SellHub Mobile App',
+    downloadApp: 'Download App',
+    downloadForIOS: 'Download for iOS',
+    downloadForAndroid: 'Download for Android',
+    appFeatures: 'App Features',
+    realTimeNotifications: 'Real-time Notifications',
+    orderManagement: 'Order Management',
+    productTracking: 'Product Tracking',
+    salesAnalytics: 'Sales Analytics',
+    qrCode: 'QR Code to Download',
+    
     // Profile
     userInformation: 'User Information',
+    accountSettings: 'Account Settings',
+    notifications: 'Notifications',
+    security: 'Security',
+    billing: 'Billing & Subscription',
     logout: 'Logout',
+    name: 'Name',
+    email: 'Email',
+    phone: 'Phone',
+    company: 'Company',
+    timezone: 'Timezone',
+    language: 'Language',
+    theme: 'Theme',
+    lightTheme: 'Light',
+    darkTheme: 'Dark',
     
     // Common
     loading: 'Loading...',
@@ -200,6 +327,17 @@ export const translations = {
     confirmDelete: 'Are you sure you want to delete?',
     update: 'Update',
     add: 'Add',
+    edit: 'Edit',
+    delete: 'Delete',
+    search: 'Search',
+    filter: 'Filter',
+    sort: 'Sort',
+    refresh: 'Refresh',
+    close: 'Close',
+    back: 'Back',
+    next: 'Next',
+    previous: 'Previous',
+    finish: 'Finish',
   }
 };
 

@@ -6,6 +6,10 @@ import ProductsTab from '@/components/dashboard/ProductsTab';
 import OtherTabs from '@/components/dashboard/OtherTabs';
 import AIInsightsTab from '@/components/dashboard/AIInsightsTab';
 import AutomationTab from '@/components/dashboard/AutomationTab';
+import MarketplacesTab from '@/components/dashboard/MarketplacesTab';
+import AIAssistantTab from '@/components/dashboard/AIAssistantTab';
+import MobileAppTab from '@/components/dashboard/MobileAppTab';
+import ProfileTab from '@/components/dashboard/ProfileTab';
 import MarketplaceConnectDialog from '@/components/dashboard/MarketplaceConnectDialog';
 import NotificationPermission from '@/components/dashboard/NotificationPermission';
 
@@ -310,8 +314,16 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
           {activeTab === 'aiInsights' && <AIInsightsTab />}
           
           {activeTab === 'automation' && <AutomationTab />}
+          
+          {activeTab === 'marketplaces' && <MarketplacesTab />}
+          
+          {activeTab === 'aiAssistant' && <AIAssistantTab />}
+          
+          {activeTab === 'mobileApp' && <MobileAppTab />}
+          
+          {activeTab === 'profile' && <ProfileTab onLogout={onLogout} />}
 
-          {(activeTab === 'orders' || activeTab === 'customers' || activeTab === 'marketplaces' || activeTab === 'profile') && (
+          {(activeTab === 'orders' || activeTab === 'customers') && (
             <OtherTabs
               activeTab={activeTab}
               orders={orders}

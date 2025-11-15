@@ -3,6 +3,7 @@ import Icon from '@/components/ui/icon';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
 import NotificationCenter from './NotificationCenter';
+import ThemeToggle from '@/components/ui/theme-toggle';
 
 interface SidebarProps {
   activeTab: string;
@@ -15,11 +16,13 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const menuItems = [
     { id: 'dashboard', icon: 'LayoutDashboard', label: t('dashboard') },
     { id: 'aiInsights', icon: 'Sparkles', label: t('aiInsights') },
+    { id: 'aiAssistant', icon: 'Bot', label: t('aiAssistant') },
     { id: 'automation', icon: 'Zap', label: t('automation') },
     { id: 'products', icon: 'Package', label: t('products') },
     { id: 'orders', icon: 'ShoppingCart', label: t('orders') },
     { id: 'customers', icon: 'Users', label: t('customers') },
     { id: 'marketplaces', icon: 'Globe', label: t('marketplaces') },
+    { id: 'mobileApp', icon: 'Smartphone', label: t('mobileApp') },
     { id: 'profile', icon: 'User', label: t('profile') }
   ];
 
@@ -56,24 +59,27 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
           ))}
         </nav>
 
-        <div className="pt-4 border-t">
-          <div className="flex gap-1 p-1 bg-muted rounded-lg">
-            <Button
-              variant={language === 'ru' ? 'default' : 'ghost'}
-              size="sm"
-              className="flex-1"
-              onClick={() => setLanguage('ru')}
-            >
-              RU
-            </Button>
-            <Button
-              variant={language === 'en' ? 'default' : 'ghost'}
-              size="sm"
-              className="flex-1"
-              onClick={() => setLanguage('en')}
-            >
-              EN
-            </Button>
+        <div className="pt-4 border-t space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1 p-1 bg-muted rounded-lg flex-1">
+              <Button
+                variant={language === 'ru' ? 'default' : 'ghost'}
+                size="sm"
+                className="flex-1"
+                onClick={() => setLanguage('ru')}
+              >
+                RU
+              </Button>
+              <Button
+                variant={language === 'en' ? 'default' : 'ghost'}
+                size="sm"
+                className="flex-1"
+                onClick={() => setLanguage('en')}
+              >
+                EN
+              </Button>
+            </div>
+            <ThemeToggle />
           </div>
         </div>
       </div>

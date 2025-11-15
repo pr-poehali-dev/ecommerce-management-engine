@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const NotificationPermission: React.FC = () => {
+  const { t } = useLanguage();
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -53,9 +55,9 @@ const NotificationPermission: React.FC = () => {
               <Icon name="Bell" className="text-purple-700 dark:text-purple-300" size={24} />
             </div>
             <div className="flex-1">
-              <CardTitle className="text-lg">Включить уведомления?</CardTitle>
+              <CardTitle className="text-lg">{t('enableNotifications')}</CardTitle>
               <CardDescription className="mt-1">
-                Получайте мгновенные уведомления о новых заказах, платежах и важных событиях
+                {t('enableNotificationsDesc')}
               </CardDescription>
             </div>
           </div>
@@ -67,14 +69,14 @@ const NotificationPermission: React.FC = () => {
             className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
           >
             <Icon name="Check" className="mr-2 h-4 w-4" />
-            Включить
+            {t('enable')}
           </Button>
           <Button 
             variant="outline" 
             onClick={dismissPrompt}
             className="flex-1"
           >
-            Позже
+            {t('later')}
           </Button>
         </CardContent>
       </Card>

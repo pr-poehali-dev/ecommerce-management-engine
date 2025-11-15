@@ -205,7 +205,7 @@ const NotificationCenter: React.FC = () => {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Icon name="Bell" size={20} className="text-purple-600" />
-                Уведомления
+                {t('notifications')}
               </CardTitle>
               {unreadCount > 0 && (
                 <Button 
@@ -214,7 +214,7 @@ const NotificationCenter: React.FC = () => {
                   onClick={markAllAsRead}
                   className="text-xs"
                 >
-                  Отметить все
+                  {t('markAllAsRead')}
                 </Button>
               )}
             </div>
@@ -225,7 +225,7 @@ const NotificationCenter: React.FC = () => {
               {notifications.length === 0 ? (
                 <div className="p-8 text-center text-muted-foreground">
                   <Icon name="BellOff" size={48} className="mx-auto mb-2 opacity-50" />
-                  <p>Нет уведомлений</p>
+                  <p>{t('loading')}</p>
                 </div>
               ) : (
                 <div className="divide-y">
@@ -259,7 +259,7 @@ const NotificationCenter: React.FC = () => {
                             {formatTime(notification.timestamp)}
                             {notification.priority === 'high' && (
                               <Badge variant="destructive" className="text-xs h-5">
-                                Срочно
+                                {t('loading')}
                               </Badge>
                             )}
                           </div>
