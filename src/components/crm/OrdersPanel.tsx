@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
@@ -18,6 +20,9 @@ interface Order {
   total_amount: number;
   items_count: number;
   order_date: string;
+  fulfillment_type?: string;
+  tracking_number?: string;
+  shipped_at?: string;
 }
 
 const OrdersPanel: React.FC = () => {
@@ -26,6 +31,10 @@ const OrdersPanel: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
+  const [shippingDialogOpen, setShippingDialogOpen] = useState(false);
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [shipping, setShipping] = useState(false);
 
   useEffect(() => {
     loadOrders();
@@ -78,6 +87,49 @@ const OrdersPanel: React.FC = () => {
         description: 'Не удалось обновить статус',
         variant: 'destructive'
       });
+    }
+  };
+
+  const handleShipOrder = async () => {
+    if (!shippingOrder || !trackingNumber) {
+      toast({
+        title: 'Ошибка',
+        description: 'Укажите трек-номер',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      setShipping(true);
+      const response = await fetch(`${CRM_API}/?action=shipOrder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          orderId: shippingOrder.id, 
+          trackingNumber 
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.order) {
+        toast({
+          title: 'Заказ отправлен',
+          description: `Трек-номер: ${trackingNumber}`
+        });
+        setShippingDialogOpen(false);
+        setTrackingNumber('');
+        loadOrders();
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось отправить заказ',
+        variant: 'destructive'
+      });
+    } finally {
+      setShipping(false);
     }
   };
 
@@ -205,7 +257,14 @@ const OrdersPanel: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-muted-foreground mb-1">Маркетплейс</p>
-                        <p className="font-medium">{order.marketplace_name || '—'}</p>
+                        <p className="font-medium">
+                          {order.marketplace_name || '—'}
+                          {order.fulfillment_type && (
+                            <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded">
+                              {order.fulfillment_type}
+                            </span>
+                          )}
+                        </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground mb-1">Сумма</p>
@@ -217,9 +276,17 @@ const OrdersPanel: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Icon name="Package" className="h-4 w-4" />
-                      <span>{order.items_count} товар(ов)</span>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <Icon name="Package" className="h-4 w-4" />
+                        <span>{order.items_count} товар(ов)</span>
+                      </div>
+                      {order.tracking_number && (
+                        <div className="flex items-center gap-2">
+                          <Icon name="Truck" className="h-4 w-4" />
+                          <span className="font-mono">{order.tracking_number}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -228,6 +295,18 @@ const OrdersPanel: React.FC = () => {
                       <Icon name="Eye" className="mr-2 h-3 w-3" />
                       Детали
                     </Button>
+                    {(order.status === 'new' || order.status === 'processing') && !order.tracking_number && (
+                      <Button 
+                        size="sm" 
+                        onClick={() => {
+                          setShippingOrder(order);
+                          setShippingDialogOpen(true);
+                        }}
+                      >
+                        <Icon name="Truck" className="mr-2 h-3 w-3" />
+                        Отправить
+                      </Button>
+                    )}
                     <Select
                       value={order.status}
                       onValueChange={(value) => handleStatusChange(order.id, value)}
@@ -263,6 +342,83 @@ const OrdersPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      <Dialog open={shippingDialogOpen} onOpenChange={setShippingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Отправка заказа</DialogTitle>
+          </DialogHeader>
+          {shippingOrder && (
+            <div className="space-y-4 pt-4">
+              <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Заказ:</span>
+                  <span className="font-semibold">{shippingOrder.order_number}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Клиент:</span>
+                  <span className="font-medium">{shippingOrder.customer_name}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Сумма:</span>
+                  <span className="font-semibold">{formatMoney(shippingOrder.total_amount)}</span>
+                </div>
+                {shippingOrder.fulfillment_type && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Тип доставки:</span>
+                    <span className="font-medium">{shippingOrder.fulfillment_type}</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="tracking">Трек-номер отправления</Label>
+                <Input
+                  id="tracking"
+                  placeholder="Например: 1234567890"
+                  value={trackingNumber}
+                  onChange={(e) => setTrackingNumber(e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Укажите трек-номер, полученный от службы доставки. 
+                  Статус заказа автоматически изменится на "Отправлен".
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button 
+                  className="flex-1" 
+                  onClick={handleShipOrder}
+                  disabled={shipping || !trackingNumber}
+                >
+                  {shipping ? (
+                    <>
+                      <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2" />
+                      Отправка...
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="Truck" className="mr-2 h-4 w-4" />
+                      Подтвердить отправку
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setShippingDialogOpen(false);
+                    setTrackingNumber('');
+                  }}
+                  disabled={shipping}
+                >
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

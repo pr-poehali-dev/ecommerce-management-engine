@@ -8,6 +8,7 @@ import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 
 const ML_API = 'https://functions.poehali.dev/108ae54f-0a71-400d-8644-1b7b5aaca990';
+const CRM_API = 'https://functions.poehali.dev/c04a2bd5-728d-4b71-866a-189e7a5acb5c';
 
 interface SalesForecast {
   date: string;
@@ -37,6 +38,9 @@ const AIToolsPanel: React.FC = () => {
   const [activeAITool, setActiveAITool] = useState<string>('sales-forecast');
   const [loading, setLoading] = useState(false);
   
+  const [products, setProducts] = useState<{id: number; name: string}[]>([]);
+  const [marketplaces, setMarketplaces] = useState<{id: number; name: string; is_connected: boolean}[]>([]);
+  
   const [productId, setProductId] = useState('1');
   const [forecastDays, setForecastDays] = useState('7');
   const [salesForecast, setSalesForecast] = useState<SalesForecast[]>([]);
@@ -45,6 +49,39 @@ const AIToolsPanel: React.FC = () => {
   
   const [marketplaceId, setMarketplaceId] = useState('1');
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+
+  React.useEffect(() => {
+    loadRealData();
+  }, []);
+
+  const loadRealData = async () => {
+    try {
+      const [productsRes, marketplacesRes] = await Promise.all([
+        fetch(`${CRM_API}/?action=getProducts`),
+        fetch(`${CRM_API}/?action=getMarketplaces`)
+      ]);
+      
+      const productsData = await productsRes.json();
+      const marketplacesData = await marketplacesRes.json();
+      
+      if (productsData.products) {
+        setProducts(productsData.products.map((p: any) => ({ id: p.id, name: p.name })));
+        if (productsData.products.length > 0) {
+          setProductId(String(productsData.products[0].id));
+        }
+      }
+      
+      if (marketplacesData.marketplaces) {
+        const connected = marketplacesData.marketplaces.filter((m: any) => m.is_connected);
+        setMarketplaces(connected.map((m: any) => ({ id: m.id, name: m.name, is_connected: m.is_connected })));
+        if (connected.length > 0) {
+          setMarketplaceId(String(connected[0].id));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load data', error);
+    }
+  };
 
   const runSalesForecast = async () => {
     try {
@@ -194,14 +231,17 @@ const AIToolsPanel: React.FC = () => {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
-              <Label htmlFor="productId">ID товара</Label>
-              <Input
-                id="productId"
-                type="number"
-                value={productId}
-                onChange={(e) => setProductId(e.target.value)}
-                placeholder="Введите ID товара"
-              />
+              <Label htmlFor="productId">Товар</Label>
+              <Select value={productId} onValueChange={setProductId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map(p => (
+                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="forecastDays">Период прогноза (дней)</Label>
@@ -260,14 +300,17 @@ const AIToolsPanel: React.FC = () => {
           <h3 className="text-lg font-semibold mb-6">Прогноз возвратов</h3>
           
           <div className="mb-6">
-            <Label htmlFor="productIdReturns">ID товара</Label>
-            <Input
-              id="productIdReturns"
-              type="number"
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              placeholder="Введите ID товара"
-            />
+            <Label htmlFor="productIdReturns">Товар</Label>
+            <Select value={productId} onValueChange={setProductId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {products.map(p => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <Button onClick={runReturnsPrediction} disabled={loading} className="w-full">
@@ -329,17 +372,26 @@ const AIToolsPanel: React.FC = () => {
           <h3 className="text-lg font-semibold mb-6">Обнаружение аномалий</h3>
           
           <div className="mb-6">
-            <Label htmlFor="marketplaceId">ID маркетплейса</Label>
+            <Label htmlFor="marketplaceId">Маркетплейс</Label>
             <Select value={marketplaceId} onValueChange={setMarketplaceId}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">Маркетплейс 1</SelectItem>
-                <SelectItem value="2">Маркетплейс 2</SelectItem>
-                <SelectItem value="3">Маркетплейс 3</SelectItem>
+                {marketplaces.length > 0 ? (
+                  marketplaces.map(m => (
+                    <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="none" disabled>Подключите маркетплейс</SelectItem>
+                )}
               </SelectContent>
             </Select>
+            {marketplaces.length === 0 && (
+              <p className="text-xs text-yellow-500 mt-2">
+                Сначала подключите маркетплейс во вкладке "Маркетплейсы"
+              </p>
+            )}
           </div>
 
           <Button onClick={runAnomalyDetection} disabled={loading} className="w-full">

@@ -44,20 +44,37 @@ const UnitEconomicsPanel: React.FC = () => {
   const calculateFromData = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${CRM_API}/?action=getAnalytics&period=90d`);
-      const data = await response.json();
       
-      if (data.summary) {
-        const avgOrder = data.summary.total_revenue / (data.summary.total_orders || 1);
+      const [analyticsRes, productsRes] = await Promise.all([
+        fetch(`${CRM_API}/?action=getAnalytics&period=90d`),
+        fetch(`${CRM_API}/?action=getProducts`)
+      ]);
+      
+      const analyticsData = await analyticsRes.json();
+      const productsData = await productsRes.json();
+      
+      if (analyticsData.summary && productsData.products) {
+        const avgOrder = analyticsData.summary.total_revenue / (analyticsData.summary.total_orders || 1);
+        
+        const productsWithCost = productsData.products.filter((p: any) => p.cost_price && p.cost_price > 0);
+        let realMargin = 0.3;
+        
+        if (productsWithCost.length > 0) {
+          const totalMarginSum = productsWithCost.reduce((sum: number, p: any) => {
+            const margin = (p.price - p.cost_price) / p.price;
+            return sum + margin;
+          }, 0);
+          realMargin = totalMarginSum / productsWithCost.length;
+        }
+        
         const repeatRate = 0.35;
         const lifespan = 18;
         const cac = 500;
-        const margin = 0.3;
         
-        const ltv = avgOrder * repeatRate * lifespan * margin;
+        const ltv = avgOrder * repeatRate * lifespan * realMargin;
         const ltvCacRatio = ltv / cac;
         const roi = ((ltv - cac) / cac) * 100;
-        const payback = cac / (avgOrder * margin * repeatRate);
+        const payback = cac / (avgOrder * realMargin * repeatRate);
         const monthlyRev = (avgOrder * repeatRate) / lifespan;
         
         setEconomics({
@@ -67,7 +84,7 @@ const UnitEconomicsPanel: React.FC = () => {
           avg_order_value: avgOrder,
           repeat_purchase_rate: repeatRate,
           customer_lifespan_months: lifespan,
-          gross_margin: margin,
+          gross_margin: realMargin,
           roi,
           payback_period_months: payback,
           monthly_revenue_per_customer: monthlyRev
@@ -187,8 +204,9 @@ const UnitEconomicsPanel: React.FC = () => {
           <div>
             <h3 className="font-semibold text-lg">Что такое юнит-экономика?</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Юнит-экономика показывает прибыльность каждого клиента. 
-              LTV (пожизненная ценность) должна быть минимум в 3 раза больше CAC (стоимость привлечения).
+              Юнит-экономика показывает чистую прибыль каждого клиента с учетом себестоимости. 
+              LTV (пожизненная ценность) должна быть минимум в 3 раза больше CAC (стоимость привлечения). 
+              Маржа рассчитывается из реальной себестоимости товаров.
             </p>
           </div>
         </div>
@@ -369,10 +387,10 @@ const UnitEconomicsPanel: React.FC = () => {
 
                 <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
                   <div>
-                    <p className="font-medium">Маржинальность</p>
-                    <p className="text-sm text-muted-foreground">Валовая прибыль</p>
+                    <p className="font-medium">Чистая маржа</p>
+                    <p className="text-sm text-muted-foreground">Прибыль с учетом себестоимости</p>
                   </div>
-                  <p className="text-lg font-bold">{(economics.gross_margin * 100).toFixed(0)}%</p>
+                  <p className="text-lg font-bold text-green-500">{(economics.gross_margin * 100).toFixed(1)}%</p>
                 </div>
               </div>
             </Card>

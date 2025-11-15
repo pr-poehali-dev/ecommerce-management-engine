@@ -15,10 +15,12 @@ interface Product {
   sku: string;
   name: string;
   price: number;
+  cost_price?: number;
   stock: number;
   category: string;
   marketplaces_count?: number;
   total_stock?: number;
+  image_url?: string;
 }
 
 const ProductsPanel: React.FC = () => {
@@ -27,6 +29,9 @@ const ProductsPanel: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMarketplace, setFilterMarketplace] = useState('all');
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -53,6 +58,69 @@ const ProductsPanel: React.FC = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const syncMarketplace = async () => {
+    if (!filterMarketplace || filterMarketplace === 'all') {
+      toast({
+        title: 'Выберите маркетплейс',
+        description: 'Для синхронизации выберите конкретный маркетплейс',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      setSyncing(true);
+      const response = await fetch(`${CRM_API}/?action=syncProducts&marketplace=${filterMarketplace}`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      if (data.synced) {
+        toast({
+          title: 'Синхронизация завершена',
+          description: `Синхронизировано товаров: ${data.synced}`
+        });
+        loadProducts();
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось синхронизировать товары',
+        variant: 'destructive'
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const updateProduct = async () => {
+    if (!editingProduct) return;
+
+    try {
+      const response = await fetch(`${CRM_API}/?action=updateProduct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingProduct)
+      });
+      const data = await response.json();
+      
+      if (data.product) {
+        toast({
+          title: 'Товар обновлен',
+          description: 'Изменения сохранены'
+        });
+        setEditDialogOpen(false);
+        loadProducts();
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось обновить товар',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -86,10 +154,25 @@ const ProductsPanel: React.FC = () => {
             Управление каталогом товаров
           </p>
         </div>
-        <Button>
-          <Icon name="Plus" className="mr-2 h-4 w-4" />
-          Добавить товар
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={syncMarketplace} disabled={syncing}>
+            {syncing ? (
+              <>
+                <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2" />
+                Синхронизация...
+              </>
+            ) : (
+              <>
+                <Icon name="RefreshCw" className="mr-2 h-4 w-4" />
+                Синхронизировать
+              </>
+            )}
+          </Button>
+          <Button>
+            <Icon name="Plus" className="mr-2 h-4 w-4" />
+            Добавить товар
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-4">
@@ -141,6 +224,18 @@ const ProductsPanel: React.FC = () => {
                   <span className="text-sm text-muted-foreground">Цена</span>
                   <span className="font-semibold">{formatMoney(product.price)}</span>
                 </div>
+                {product.cost_price !== undefined && product.cost_price > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Себестоимость</span>
+                    <span className="font-semibold text-muted-foreground">{formatMoney(product.cost_price)}</span>
+                  </div>
+                )}
+                {product.cost_price !== undefined && product.cost_price > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Маржа</span>
+                    <span className="font-semibold text-green-500">{formatMoney(product.price - product.cost_price)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Остаток</span>
                   <span className={`font-semibold ${(product.total_stock || product.stock) < 10 ? 'text-red-500' : ''}`}>
@@ -160,7 +255,15 @@ const ProductsPanel: React.FC = () => {
               </div>
 
               <div className="flex gap-2 mt-4 pt-4 border-t">
-                <Button variant="outline" size="sm" className="flex-1">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={() => {
+                    setEditingProduct(product);
+                    setEditDialogOpen(true);
+                  }}
+                >
                   <Icon name="Edit" className="mr-2 h-3 w-3" />
                   Редактировать
                 </Button>
@@ -184,6 +287,107 @@ const ProductsPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Редактирование товара</DialogTitle>
+          </DialogHeader>
+          {editingProduct && (
+            <div className="space-y-4 pt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="edit-name">Название</Label>
+                  <Input
+                    id="edit-name"
+                    value={editingProduct.name}
+                    onChange={(e) => setEditingProduct({...editingProduct, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-sku">SKU</Label>
+                  <Input
+                    id="edit-sku"
+                    value={editingProduct.sku || ''}
+                    onChange={(e) => setEditingProduct({...editingProduct, sku: e.target.value})}
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="edit-price">Цена продажи (₽)</Label>
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    value={editingProduct.price}
+                    onChange={(e) => setEditingProduct({...editingProduct, price: parseFloat(e.target.value) || 0})}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-cost">Себестоимость (₽)</Label>
+                  <Input
+                    id="edit-cost"
+                    type="number"
+                    value={editingProduct.cost_price || 0}
+                    onChange={(e) => setEditingProduct({...editingProduct, cost_price: parseFloat(e.target.value) || 0})}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Используется для расчета чистой прибыли
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="edit-stock">Остаток (шт)</Label>
+                  <Input
+                    id="edit-stock"
+                    type="number"
+                    value={editingProduct.stock}
+                    onChange={(e) => setEditingProduct({...editingProduct, stock: parseInt(e.target.value) || 0})}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-category">Категория</Label>
+                  <Input
+                    id="edit-category"
+                    value={editingProduct.category}
+                    onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              {editingProduct.cost_price && editingProduct.cost_price > 0 && (
+                <div className="p-4 bg-muted/50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Маржа на единицу:</span>
+                    <span className="text-lg font-bold text-green-500">
+                      {formatMoney(editingProduct.price - (editingProduct.cost_price || 0))}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-sm font-medium">Наценка:</span>
+                    <span className="text-sm font-semibold">
+                      {((editingProduct.price / (editingProduct.cost_price || 1) - 1) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <Button className="flex-1" onClick={updateProduct}>
+                  <Icon name="Save" className="mr-2 h-4 w-4" />
+                  Сохранить
+                </Button>
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
