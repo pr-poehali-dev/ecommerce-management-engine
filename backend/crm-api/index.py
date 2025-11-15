@@ -90,7 +90,8 @@ def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
         raise ValueError('DATABASE_URL not set')
-    conn = psycopg2.connect(database_url)
+    
+    conn = psycopg2.connect(database_url, options='-c search_path=t_p86529894_ecommerce_management,public')
     conn.set_session(autocommit=True)
     return conn
 
@@ -464,22 +465,22 @@ def get_marketplaces() -> Dict[str, Any]:
     
     cur.execute("""
         SELECT m.id, m.name, m.slug, m.logo_url, m.description
-        FROM t_p86529894_ecommerce_management.marketplaces m
+        FROM marketplaces m
         ORDER BY m.id
     """)
     marketplaces_raw = [dict(row) for row in cur.fetchall()]
     
     cur.execute("""
         SELECT marketplace_id, id, last_sync_at
-        FROM t_p86529894_ecommerce_management.user_marketplace_integrations
+        FROM user_marketplace_integrations
         WHERE user_id = 1
     """)
     integrations = {row['marketplace_id']: dict(row) for row in cur.fetchall()}
     
-    cur.execute("SELECT marketplace_id FROM t_p86529894_ecommerce_management.marketplace_products")
+    cur.execute("SELECT marketplace_id FROM marketplace_products")
     mp_products = [row['marketplace_id'] for row in cur.fetchall()]
     
-    cur.execute("SELECT marketplace_id, total_amount FROM t_p86529894_ecommerce_management.orders WHERE marketplace_id IS NOT NULL")
+    cur.execute("SELECT marketplace_id, total_amount FROM orders WHERE marketplace_id IS NOT NULL")
     orders_data = cur.fetchall()
     
     product_counts = {}
