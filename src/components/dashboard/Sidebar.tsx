@@ -2,6 +2,7 @@ import React from 'react';
 import Icon from '@/components/ui/icon';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
+import NotificationCenter from './NotificationCenter';
 
 interface SidebarProps {
   activeTab: string;
@@ -23,16 +24,19 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   ];
 
   return (
-    <aside className="w-64 min-h-screen bg-gradient-to-b from-card to-background border-r">
-      <div className="p-6">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg">
-            <Icon name="Store" className="text-white" size={24} />
+    <aside className="w-64 min-h-screen bg-gradient-to-b from-card to-background border-r flex flex-col">
+      <div className="p-6 flex-1">
+        <div className="flex items-center justify-between gap-3 mb-8">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg">
+              <Icon name="Store" className="text-white" size={24} />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">SellHub</h1>
+              <p className="text-xs text-muted-foreground">AI-Powered</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">SellHub</h1>
-            <p className="text-xs text-muted-foreground">AI-Powered Platform</p>
-          </div>
+          <NotificationCenter />
         </div>
 
         <nav className="space-y-1 mb-6">

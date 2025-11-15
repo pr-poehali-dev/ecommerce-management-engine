@@ -7,6 +7,7 @@ import OtherTabs from '@/components/dashboard/OtherTabs';
 import AIInsightsTab from '@/components/dashboard/AIInsightsTab';
 import AutomationTab from '@/components/dashboard/AutomationTab';
 import MarketplaceConnectDialog from '@/components/dashboard/MarketplaceConnectDialog';
+import NotificationPermission from '@/components/dashboard/NotificationPermission';
 
 const API_URL = 'https://functions.poehali.dev/26680cc3-0053-45ae-ac6a-1c7a3c94505c';
 
@@ -281,7 +282,8 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
               analytics={analytics} 
               orders={orders} 
               products={products} 
-              customers={customers} 
+              customers={customers}
+              onNavigate={setActiveTab}
             />
           )}
 
@@ -331,6 +333,8 @@ const Index: React.FC<IndexProps> = ({ onLogout }) => {
         marketplace={selectedMarketplace}
         onConnect={handleMarketplaceConnect}
       />
+      
+      <NotificationPermission />
     </div>
   );
 };

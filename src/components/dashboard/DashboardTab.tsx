@@ -7,6 +7,8 @@ import Icon from '@/components/ui/icon';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { exportFullReport } from '@/lib/excel-export';
 import { useLanguage } from '@/contexts/LanguageContext';
+import LiveActivityFeed from './LiveActivityFeed';
+import QuickActions from './QuickActions';
 
 interface Analytics {
   revenue: number;
@@ -30,13 +32,16 @@ interface DashboardTabProps {
   orders: Order[];
   products: any[];
   customers: any[];
+  onNavigate?: (tab: string) => void;
 }
 
-const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products, customers }) => {
+const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products, customers, onNavigate }) => {
   const { t } = useLanguage();
   
   return (
     <div className="space-y-6 animate-fade-in">
+      {onNavigate && <QuickActions onNavigate={onNavigate} />}
+      
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
@@ -143,49 +148,53 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ analytics, orders, products
         </Card>
       </div>
 
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Icon name="Clock" className="text-blue-600" />
-            {t('recentOrders')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('orderId')}</TableHead>
-                <TableHead>{t('customer')}</TableHead>
-                <TableHead>{t('date')}</TableHead>
-                <TableHead>{t('status')}</TableHead>
-                <TableHead>{t('total')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(orders || []).slice(0, 5).map((order) => (
-                <TableRow key={order.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium">{order.id}</TableCell>
-                  <TableCell>{order.customerName}</TableCell>
-                  <TableCell>{order.date}</TableCell>
-                  <TableCell>
-                    <Badge 
-                      variant={order.status === 'delivered' ? 'default' : 'secondary'}
-                      className={
-                        order.status === 'delivered' ? 'bg-green-600' :
-                        order.status === 'shipped' ? 'bg-blue-600' :
-                        'bg-orange-600'
-                      }
-                    >
-                      {t(order.status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-semibold">{(order.total || 0).toLocaleString('ru-RU')} ₽</TableCell>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Icon name="Clock" className="text-blue-600" />
+              {t('recentOrders')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('orderId')}</TableHead>
+                  <TableHead>{t('customer')}</TableHead>
+                  <TableHead>{t('date')}</TableHead>
+                  <TableHead>{t('status')}</TableHead>
+                  <TableHead>{t('total')}</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {(orders || []).slice(0, 5).map((order) => (
+                  <TableRow key={order.id} className="hover:bg-muted/50">
+                    <TableCell className="font-medium">{order.id}</TableCell>
+                    <TableCell>{order.customerName}</TableCell>
+                    <TableCell>{order.date}</TableCell>
+                    <TableCell>
+                      <Badge 
+                        variant={order.status === 'delivered' ? 'default' : 'secondary'}
+                        className={
+                          order.status === 'delivered' ? 'bg-green-600' :
+                          order.status === 'shipped' ? 'bg-blue-600' :
+                          'bg-orange-600'
+                        }
+                      >
+                        {t(order.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-semibold">{(order.total || 0).toLocaleString('ru-RU')} ₽</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <LiveActivityFeed />
+      </div>
     </div>
   );
 };
